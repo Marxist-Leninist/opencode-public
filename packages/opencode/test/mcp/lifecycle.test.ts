@@ -599,7 +599,7 @@ test(
 )
 
 test(
-  "deferred MCP servers expose search/load before individual tools",
+  "deferred MCP servers expose mcp_search that auto-loads matched tools",
   withInstance(
     {
       "deferred-server": {
@@ -634,53 +634,124 @@ test(
 
         const before = yield* mcp.tools()
         expect(before.mcp_search).toBeDefined()
-        expect(before.mcp_load).toBeDefined()
+        expect(before.mcp_load).toBeUndefined() // dropped: search auto-loads
         expect(before["deferred-server_memory_tags"]).toBeUndefined()
         expect(before["deferred-server_vault_search"]).toBeUndefined()
 
+        // Free-text search auto-loads top match.
         const searchResult = (yield* Effect.promise(() =>
-          (before.mcp_search!.execute as any)({ query: "memory" }),
+          (before.mcp_search!.execute as any)({ query: "memory", limit: 1 }),
         )) as { content: Array<{ type: "text"; text: string }> }
         const search = JSON.parse(searchResult.content[0]!.text) as {
-          matches: Array<{ server: string; name: string; tool: string }>
+          loaded: string[]
+          matches: Array<{ tool: string; desc: string }>
         }
-        expect(search.matches[0]).toMatchObject({
-          server: "deferred-server",
-          name: "memory_tags",
-          tool: "deferred-server_memory_tags",
-        })
+        expect(search.loaded).toContain("deferred-server_memory_tags")
+        expect(search.matches[0]?.tool).toBe("deferred-server_memory_tags")
+        // No verbose hint fields — token-minimal output.
+        expect((search as any).next).toBeUndefined()
+        expect((search as any).deferredServers).toBeUndefined()
 
+        // Smart mode finds microwave_calc from natural language.
         const smartResult = (yield* Effect.promise(() =>
-          (before.mcp_search!.execute as any)({ query: "cook frozen sausage", mode: "smart" }),
+          (before.mcp_search!.execute as any)({ query: "cook frozen sausage", mode: "smart", limit: 1 }),
         )) as { content: Array<{ type: "text"; text: string }> }
         const smart = JSON.parse(smartResult.content[0]!.text) as {
-          matches: Array<{ server: string; name: string; tool: string }>
-          mode: string
+          loaded: string[]
+          matches: Array<{ tool: string }>
         }
-        expect(smart.mode).toBe("smart")
-        expect(smart.matches[0]).toMatchObject({
-          name: "microwave_calc",
-          tool: "deferred-server_microwave_calc",
-        })
+        expect(smart.loaded).toContain("deferred-server_microwave_calc")
+        expect(smart.matches[0]?.tool).toBe("deferred-server_microwave_calc")
 
+        // Standard mode is strict — no match for natural language.
         const standardResult = (yield* Effect.promise(() =>
           (before.mcp_search!.execute as any)({ query: "cook frozen sausage", mode: "standard" }),
         )) as { content: Array<{ type: "text"; text: string }> }
-        const standard = JSON.parse(standardResult.content[0]!.text) as { matches: unknown[]; mode: string }
-        expect(standard.mode).toBe("standard")
+        const standard = JSON.parse(standardResult.content[0]!.text) as { matches: unknown[]; loaded: string[] }
         expect(standard.matches).toHaveLength(0)
+        expect(standard.loaded).toHaveLength(0)
 
-        const loadResult = (yield* Effect.promise(() =>
-          (before.mcp_load!.execute as any)({ tool: search.matches[0]!.tool }),
-        )) as { content: Array<{ type: "text"; text: string }> }
-        const load = JSON.parse(loadResult.content[0]!.text) as { loaded: Array<{ tool: string }> }
-        expect(load.loaded.map((item) => item.tool)).toContain("deferred-server_memory_tags")
-
+        // After two successful searches, both matched tools are now in the registry.
         const after = yield* mcp.tools()
         expect(after.mcp_search).toBeDefined()
-        expect(after.mcp_load).toBeDefined()
         expect(after["deferred-server_memory_tags"]).toBeDefined()
+        expect(after["deferred-server_microwave_calc"]).toBeDefined()
         expect(after["deferred-server_vault_search"]).toBeUndefined()
+      }),
+  ),
+)
+
+test(
+  "mcp_search supports select: direct id lookup",
+  withInstance(
+    {
+      "svc": {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "svc"
+        const serverState = getOrCreateClientState("svc")
+        serverState.tools = [
+          { name: "alpha", description: "alpha", inputSchema: { type: "object", properties: {} } },
+          { name: "beta", description: "beta", inputSchema: { type: "object", properties: {} } },
+        ]
+
+        const before = yield* mcp.tools()
+        const result = (yield* Effect.promise(() =>
+          (before.mcp_search!.execute as any)({ query: "select:svc_alpha,svc_beta,svc_unknown" }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const parsed = JSON.parse(result.content[0]!.text) as {
+          loaded: string[]
+          missing: string[]
+          matches: Array<{ tool: string }>
+        }
+        expect(parsed.loaded.sort()).toEqual(["svc_alpha", "svc_beta"])
+        expect(parsed.missing).toEqual(["svc_unknown"])
+
+        const after = yield* mcp.tools()
+        expect(after.svc_alpha).toBeDefined()
+        expect(after.svc_beta).toBeDefined()
+      }),
+  ),
+)
+
+test(
+  "mcp_search dry_run returns matches without loading",
+  withInstance(
+    {
+      "svc": {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "svc"
+        const serverState = getOrCreateClientState("svc")
+        serverState.tools = [
+          { name: "alpha", description: "alpha tool", inputSchema: { type: "object", properties: {} } },
+        ]
+
+        const before = yield* mcp.tools()
+        const result = (yield* Effect.promise(() =>
+          (before.mcp_search!.execute as any)({ query: "alpha", dry_run: true }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const parsed = JSON.parse(result.content[0]!.text) as {
+          loaded: string[]
+          matches: Array<{ tool: string }>
+          dry_run: boolean
+        }
+        expect(parsed.loaded).toEqual([])
+        expect(parsed.matches[0]?.tool).toBe("svc_alpha")
+        expect(parsed.dry_run).toBe(true)
+
+        const after = yield* mcp.tools()
+        expect(after.svc_alpha).toBeUndefined() // not loaded
       }),
   ),
 )

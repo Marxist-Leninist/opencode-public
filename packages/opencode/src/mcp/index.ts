@@ -115,8 +115,7 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
 const DEFERRED_SEARCH_TOOL = "mcp_search"
-const DEFERRED_LOAD_TOOL = "mcp_load"
-const DEFAULT_DEFERRED_SEARCH_LIMIT = 20
+const DEFAULT_DEFERRED_SEARCH_LIMIT = 5
 const MAX_DEFERRED_SEARCH_LIMIT = 50
 const DEFAULT_DEFERRED_SEARCH_MODE: DeferredSearchMode = "smart"
 
@@ -211,7 +210,14 @@ function textToolResult(text: string) {
 }
 
 function jsonToolResult(value: unknown) {
-  return textToolResult(JSON.stringify(value, null, 2))
+  return textToolResult(JSON.stringify(value))
+}
+
+const MAX_MATCH_DESC = 80
+function trimDesc(desc: string) {
+  if (!desc) return ""
+  const oneLine = desc.replace(/\s+/g, " ").trim()
+  return oneLine.length > MAX_MATCH_DESC ? oneLine.slice(0, MAX_MATCH_DESC - 3) + "..." : oneLine
 }
 
 function readString(value: unknown) {
@@ -221,6 +227,46 @@ function readString(value: unknown) {
 function readLimit(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_DEFERRED_SEARCH_LIMIT
   return Math.max(1, Math.min(Math.floor(value), MAX_DEFERRED_SEARCH_LIMIT))
+}
+
+/**
+ * Parse a deferred MCP search query.
+ *
+ * Supported forms (Codex / Claude Code style):
+ * - `select:server_tool1,server_tool2` - fetch these exact tool ids, skipping ranking
+ * - `+token` - token MUST appear in name/server/description (filter)
+ * - `keyword keyword` - keyword search, ranked
+ *
+ * Forms can mix: `+memory tags`, `select:sg2_memory_tags,sg2_microwave_calc`, etc.
+ */
+export function parseDeferredSearchQuery(raw: string | undefined): {
+  select: string[]
+  required: string[]
+  query?: string
+} {
+  if (!raw) return { select: [], required: [] }
+  const trimmed = raw.trim()
+  if (!trimmed) return { select: [], required: [] }
+  const select: string[] = []
+  const required: string[] = []
+  const remaining: string[] = []
+  for (const part of trimmed.split(/\s+/)) {
+    if (part.toLowerCase().startsWith("select:")) {
+      const ids = part.slice("select:".length).split(",")
+      for (const id of ids) {
+        const v = id.trim()
+        if (v) select.push(v)
+      }
+      continue
+    }
+    if (part.startsWith("+") && part.length > 1) {
+      required.push(part.slice(1).toLowerCase())
+      continue
+    }
+    remaining.push(part)
+  }
+  const query = remaining.join(" ").trim() || undefined
+  return { select, required, query }
 }
 
 function searchTokens(value: string | undefined) {
@@ -270,11 +316,13 @@ export function searchDeferredToolDefinitions(input: {
   server?: string
   limit?: number
   mode?: "standard" | "smart"
+  required?: string[]
 }) {
   const mode = input.mode ?? DEFAULT_DEFERRED_SEARCH_MODE
   const tokens = searchTokens(input.query)
   const expandedTokens = mode === "smart" ? expandSmartTokens(tokens) : tokens
   const serverFilter = input.server?.toLowerCase()
+  const required = (input.required ?? []).map((r) => r.toLowerCase()).filter(Boolean)
   const limit = Math.max(1, Math.min(input.limit ?? DEFAULT_DEFERRED_SEARCH_LIMIT, MAX_DEFERRED_SEARCH_LIMIT))
   const matches: DeferredToolMatch[] = []
 
@@ -290,6 +338,9 @@ export function searchDeferredToolDefinitions(input: {
       const serverTerms = new Set(searchTokens(server))
       const descriptionTerms = new Set(searchTokens(description))
       const haystack = `${server} ${mcpTool.name} ${description}`.toLowerCase()
+
+      // Required tokens (`+foo`) must all appear somewhere in the haystack.
+      if (required.length && !required.every((req) => haystack.includes(req))) continue
 
       if (tokens.length) {
         if (mode === "standard" && !tokens.every((token) => haystack.includes(token))) continue
@@ -1054,153 +1105,135 @@ export const layer = Layer.effect(
       )
 
       if (deferredServers.length > 0) {
+        // Build a compact catalog hint for the description so the model knows
+        // which servers exist without us spending tokens listing every tool.
+        const catalogHint = deferredServers
+          .map((srv) => {
+            const count = s.defs[srv]?.length ?? 0
+            return `${srv}(${count})`
+          })
+          .join(", ")
+
         result[DEFERRED_SEARCH_TOOL] = dynamicTool({
           description:
-            "Search deferred MCP server tool catalogs. Use this before loading tools from large MCP servers; it returns compact candidates that can be activated with mcp_load.",
+            `Search and auto-load tools from deferred MCP servers (${catalogHint}). ` +
+            `Matched tools become available on the next step. Query forms: ` +
+            `\`select:srv_tool1,srv_tool2\` (load by id, no ranking); ` +
+            `\`+token\` (token must appear); plain keywords (ranked).`,
           inputSchema: jsonSchema({
             type: "object",
             properties: {
               query: {
                 type: "string",
-                description: "Words to search for in MCP server names, tool names, and descriptions.",
+                description:
+                  "Search query. Supports `select:id1,id2`, `+required`, and free-text keywords. Required.",
               },
-              server: {
-                type: "string",
-                description: "Optional MCP server name to search within.",
-              },
+              server: { type: "string", description: "Restrict to a single MCP server." },
               limit: {
                 type: "number",
-                description: `Maximum number of matches to return, capped at ${MAX_DEFERRED_SEARCH_LIMIT}.`,
+                description: `Max matches to load (default ${DEFAULT_DEFERRED_SEARCH_LIMIT}, cap ${MAX_DEFERRED_SEARCH_LIMIT}).`,
               },
               mode: {
                 type: "string",
                 enum: ["standard", "smart", "augment"],
                 description:
-                  "Search mode. standard uses strict token matching, smart uses local query expansion and ranking, augment reranks smart matches with an LLM.",
+                  "standard=strict token match, smart=local expansion (default), augment=LLM rerank.",
               },
               model: {
                 type: "string",
-                description:
-                  "Optional provider/model id for augment mode, for example `deepseek/deepseek-v4-pro`. Overrides the configured augment model.",
+                description: "Override the augment model, e.g. `deepseek/deepseek-v4-flash`.",
+              },
+              dry_run: {
+                type: "boolean",
+                description: "If true, return matches without activating them.",
               },
             },
+            required: ["query"],
             additionalProperties: false,
           }),
           execute: async (args: unknown) => {
             const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
-            const mode = readSearchMode(input.mode, cfg)
-            const query = readString(input.query)
+            const rawQuery = readString(input.query)
+            const parsed = parseDeferredSearchQuery(rawQuery)
             const limit = readLimit(input.limit)
-            const prefilterLimit =
-              mode === "augment" ? Math.max(limit, Math.min(MAX_DEFERRED_SEARCH_LIMIT, limit * 4)) : limit
-            let matches = searchDeferredToolDefinitions({
-              defs: s.defs,
-              selected: s.selected,
-              servers: deferredServers,
-              query,
-              server: readString(input.server),
-              limit: prefilterLimit,
-              mode: mode === "standard" ? "standard" : "smart",
-            })
-            const augmentation =
-              mode === "augment"
-                ? await bridge.promise(
-                    augmentDeferredMatches({
-                      query,
-                      matches,
-                      limit,
-                      model: readString(input.model),
-                    }),
-                  )
-                : { matches: matches.slice(0, limit), augmented: false as const }
-            matches = augmentation.matches
-            const augmentationMeta = augmentation as unknown as { model?: string; warning?: string }
+            const dryRun = input.dry_run === true
+            const serverFilter = readString(input.server)
 
-            return jsonToolResult({
-              matches,
-              count: matches.length,
-              mode,
-              augmented: augmentation.augmented,
-              ...(augmentationMeta.model ? { model: augmentationMeta.model } : {}),
-              ...(augmentationMeta.warning ? { warning: augmentationMeta.warning } : {}),
-              deferredServers,
-              next: "Call mcp_load with the `tool` value from a match, or with `server` and `name`.",
-            })
-          },
-        })
-
-        result[DEFERRED_LOAD_TOOL] = dynamicTool({
-          description:
-            "Activate one or more tools from deferred MCP servers. Loaded tools become available on the next assistant step.",
-          inputSchema: jsonSchema({
-            type: "object",
-            properties: {
-              tool: {
-                type: "string",
-                description: "A tool id returned by mcp_search, for example `github_create_issue`.",
-              },
-              tools: {
-                type: "array",
-                items: { type: "string" },
-                description: "Multiple tool ids returned by mcp_search.",
-              },
-              server: {
-                type: "string",
-                description: "MCP server name. Use with `name` when not passing `tool`.",
-              },
-              name: {
-                type: "string",
-                description: "Original MCP tool name. Use with `server` when not passing `tool`.",
-              },
-            },
-            additionalProperties: false,
-          }),
-          execute: async (args: unknown) => {
-            const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
-            const requested = [
-              ...(Array.isArray(input.tools) ? input.tools : [])
-                .filter((item): item is string => typeof item === "string")
-                .map((item) => item.trim()),
-              ...[readString(input.tool)].filter((item): item is string => !!item),
-            ].filter((item) => item.length > 0)
-            const loaded: Array<{ server: string; name: string; tool: string }> = []
+            const loaded: string[] = []
             const missing: string[] = []
+            const matches: Array<{ tool: string; desc: string }> = []
 
-            if (requested.length === 0) {
-              const found = findDeferredTool({
-                defs: s.defs,
-                servers: deferredServers,
-                server: readString(input.server),
-                name: readString(input.name),
-              })
-              if (found) requested.push(found.key)
-              else missing.push([readString(input.server), readString(input.name)].filter(Boolean).join("/") || "tool")
-            }
-
-            for (const requestedTool of requested) {
-              const found = findDeferredTool({
-                defs: s.defs,
-                servers: deferredServers,
-                tool: requestedTool,
-              })
-              if (!found) {
-                missing.push(requestedTool)
-                continue
+            if (parsed.select.length > 0) {
+              // select: bypasses ranking with direct id lookup, then auto-loads.
+              for (const id of parsed.select) {
+                const found = findDeferredTool({
+                  defs: s.defs,
+                  servers: deferredServers,
+                  tool: id,
+                })
+                if (!found) {
+                  missing.push(id)
+                  continue
+                }
+                matches.push({
+                  tool: found.key,
+                  desc: trimDesc(found.tool.description ?? ""),
+                })
+                if (!dryRun) {
+                  s.selected[found.server] ??= new Set<string>()
+                  s.selected[found.server].add(found.tool.name)
+                  loaded.push(found.key)
+                }
               }
-
-              s.selected[found.server] ??= new Set<string>()
-              s.selected[found.server].add(found.tool.name)
-              loaded.push({ server: found.server, name: found.tool.name, tool: found.key })
+            } else {
+              const mode = readSearchMode(input.mode, cfg)
+              const prefilterLimit =
+                mode === "augment" ? Math.max(limit, Math.min(MAX_DEFERRED_SEARCH_LIMIT, limit * 4)) : limit
+              const scored = searchDeferredToolDefinitions({
+                defs: s.defs,
+                selected: s.selected,
+                servers: deferredServers,
+                query: parsed.query,
+                server: serverFilter,
+                limit: prefilterLimit,
+                mode: mode === "standard" ? "standard" : "smart",
+                required: parsed.required,
+              })
+              const augmentation =
+                mode === "augment" && parsed.query
+                  ? await bridge.promise(
+                      augmentDeferredMatches({
+                        query: parsed.query,
+                        matches: scored,
+                        limit,
+                        model: readString(input.model),
+                      }),
+                    )
+                  : { matches: scored.slice(0, limit), augmented: false as const }
+              const augmentationMeta = augmentation as unknown as { model?: string; warning?: string }
+              for (const match of augmentation.matches) {
+                matches.push({ tool: match.tool, desc: trimDesc(match.description) })
+                if (!dryRun) {
+                  s.selected[match.server] ??= new Set<string>()
+                  s.selected[match.server].add(match.name)
+                  loaded.push(match.tool)
+                }
+              }
+              const out: Record<string, unknown> = { loaded, matches }
+              if (mode === "augment") {
+                out.augmented = augmentation.augmented
+                if (augmentationMeta.model) out.model = augmentationMeta.model
+              }
+              if (augmentationMeta.warning) out.warning = augmentationMeta.warning
+              if (missing.length) out.missing = missing
+              if (dryRun) out.dry_run = true
+              return jsonToolResult(out)
             }
 
-            return jsonToolResult({
-              loaded,
-              missing,
-              next:
-                loaded.length > 0
-                  ? "The loaded MCP tools will be available on the next assistant step."
-                  : "No tools were loaded. Call mcp_search to find available deferred MCP tools.",
-            })
+            const out: Record<string, unknown> = { loaded, matches }
+            if (missing.length) out.missing = missing
+            if (dryRun) out.dry_run = true
+            return jsonToolResult(out)
           },
         })
       }

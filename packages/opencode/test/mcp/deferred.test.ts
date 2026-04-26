@@ -231,10 +231,58 @@ test("searchDeferredToolDefinitions reports loaded flag from selected sets", () 
   expect(matches[0].loaded).toBe(true)
 })
 
+test("searchDeferredToolDefinitions enforces +required tokens", () => {
+  const defs = {
+    big: [
+      { name: "memory_tags", description: "Memory tags", inputSchema: { type: "object" } },
+      { name: "vault_tags", description: "Vault tags", inputSchema: { type: "object" } },
+    ],
+  }
+  const matches = MCP.searchDeferredToolDefinitions({
+    defs: defs as any,
+    selected: {},
+    servers: ["big"],
+    query: "tags",
+    required: ["memory"],
+  })
+  expect(matches).toHaveLength(1)
+  expect(matches[0].name).toBe("memory_tags")
+})
+
+// --- Pure unit tests for parseDeferredSearchQuery ---
+
+test("parseDeferredSearchQuery extracts select: ids", () => {
+  const parsed = MCP.parseDeferredSearchQuery("select:srv_one,srv_two")
+  expect(parsed.select).toEqual(["srv_one", "srv_two"])
+  expect(parsed.required).toEqual([])
+  expect(parsed.query).toBeUndefined()
+})
+
+test("parseDeferredSearchQuery extracts +required tokens", () => {
+  const parsed = MCP.parseDeferredSearchQuery("+memory tags labels")
+  expect(parsed.select).toEqual([])
+  expect(parsed.required).toEqual(["memory"])
+  expect(parsed.query).toBe("tags labels")
+})
+
+test("parseDeferredSearchQuery handles mixed forms", () => {
+  const parsed = MCP.parseDeferredSearchQuery("+memory +tags select:srv_one labels")
+  expect(parsed.select).toEqual(["srv_one"])
+  expect(parsed.required).toEqual(["memory", "tags"])
+  expect(parsed.query).toBe("labels")
+})
+
+test("parseDeferredSearchQuery handles empty input", () => {
+  const empty = MCP.parseDeferredSearchQuery(undefined)
+  expect(empty.select).toEqual([])
+  expect(empty.required).toEqual([])
+  expect(empty.query).toBeUndefined()
+})
+
 // --- Integration tests via the live MCP layer ---
 
 test(
-  "deferred server only exposes mcp_search and mcp_load until tools are loaded",
+  "deferred server only exposes mcp_search until matches are auto-loaded",
   withInstance(
     {
       "big-server": {
@@ -261,30 +309,18 @@ test(
         expect((addResult.status as any)["big-server"]?.status ?? (addResult.status as any).status).toBe("connected")
 
         const toolsBefore = yield* mcp.tools()
-        const initialKeys = Object.keys(toolsBefore).sort()
-        expect(initialKeys).toEqual(["mcp_load", "mcp_search"])
+        // Only the search tool; no separate mcp_load.
+        expect(Object.keys(toolsBefore).sort()).toEqual(["mcp_search"])
 
         const search = (toolsBefore as any).mcp_search
-        const searchResult = yield* Effect.tryPromise(() => execTool(search, { query: "create" }))
+        const searchResult = yield* Effect.tryPromise(() => execTool(search, { query: "create", limit: 1 }))
         const parsed = parseJsonResult(searchResult)
-        expect(parsed.matches.length).toBeGreaterThan(0)
-        const target = parsed.matches.find((m: any) => m.name === "create_issue")
-        expect(target).toBeDefined()
-        expect(target.tool).toBe("big-server_create_issue")
-        expect(target.loaded).toBe(false)
-
-        const load = (toolsBefore as any).mcp_load
-        const loadResult = yield* Effect.tryPromise(() => execTool(load, { tool: "big-server_create_issue" }))
-        const loadParsed = parseJsonResult(loadResult)
-        expect(loadParsed.loaded).toEqual([
-          { server: "big-server", name: "create_issue", tool: "big-server_create_issue" },
-        ])
-        expect(loadParsed.missing).toEqual([])
+        expect(parsed.loaded).toEqual(["big-server_create_issue"])
+        expect(parsed.matches[0].tool).toBe("big-server_create_issue")
 
         const toolsAfter = yield* mcp.tools()
         const afterKeys = Object.keys(toolsAfter).sort()
         expect(afterKeys).toContain("mcp_search")
-        expect(afterKeys).toContain("mcp_load")
         expect(afterKeys).toContain("big-server_create_issue")
         expect(afterKeys).not.toContain("big-server_delete_issue")
       }),
@@ -312,8 +348,7 @@ test(
         yield* mcp.add("auto", { type: "local", command: ["echo", "test"] })
 
         const tools = yield* mcp.tools()
-        const keys = Object.keys(tools).sort()
-        expect(keys).toEqual(["mcp_load", "mcp_search"])
+        expect(Object.keys(tools).sort()).toEqual(["mcp_search"])
       }),
     { defer_mcp_tools: true },
   ),
@@ -344,13 +379,12 @@ test(
         expect(keys).toContain("eager_do_thing")
         expect(keys).toContain("eager_do_other")
         expect(keys).not.toContain("mcp_search")
-        expect(keys).not.toContain("mcp_load")
       }),
   ),
 )
 
 test(
-  "mcp_load returns missing entries for unknown tool ids",
+  "mcp_search select: returns missing for unknown ids",
   withInstance(
     {
       svc: {
@@ -368,11 +402,47 @@ test(
         yield* mcp.add("svc", { type: "local", command: ["echo", "test"], defer: true })
 
         const tools = yield* mcp.tools()
-        const load = (tools as any).mcp_load
-        const result = yield* Effect.tryPromise(() => execTool(load, { tools: ["svc_does_not_exist"] }))
+        const search = (tools as any).mcp_search
+        const result = yield* Effect.tryPromise(() =>
+          execTool(search, { query: "select:svc_does_not_exist" }),
+        )
         const parsed = parseJsonResult(result)
         expect(parsed.loaded).toEqual([])
         expect(parsed.missing).toEqual(["svc_does_not_exist"])
+      }),
+  ),
+)
+
+test(
+  "mcp_search dry_run does not mutate selected state",
+  withInstance(
+    {
+      svc: {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "svc"
+        const state = getOrCreateClientState("svc")
+        state.tools = [
+          { name: "alpha", description: "alpha tool", inputSchema: { type: "object", properties: {} } },
+        ]
+
+        yield* mcp.add("svc", { type: "local", command: ["echo", "test"], defer: true })
+
+        const tools = yield* mcp.tools()
+        const search = (tools as any).mcp_search
+        const result = yield* Effect.tryPromise(() => execTool(search, { query: "alpha", dry_run: true }))
+        const parsed = parseJsonResult(result)
+        expect(parsed.loaded).toEqual([])
+        expect(parsed.matches[0].tool).toBe("svc_alpha")
+        expect(parsed.dry_run).toBe(true)
+
+        const after = yield* mcp.tools()
+        expect((after as any).svc_alpha).toBeUndefined()
       }),
   ),
 )

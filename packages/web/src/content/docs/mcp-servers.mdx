@@ -26,10 +26,16 @@ Large MCP servers can expose dozens or hundreds of tools. Set `defer` to `true` 
 }
 ```
 
-When any connected server is deferred, OpenCode exposes two small tools instead:
+When any connected server is deferred, OpenCode exposes one small discovery tool instead:
 
 - `mcp_search` searches deferred MCP server names, tool names, and descriptions.
-- `mcp_load` activates selected tools. Loaded tools are available on the next assistant step.
+- Matching tools are automatically activated and become available on the next assistant step.
+- Pass `dry_run: true` to inspect matches without activating them.
+
+`mcp_search` also accepts compact query operators:
+
+- `select:server_tool1,server_tool2` loads exact tool ids without ranking.
+- `+token` requires that token to appear in the server name, tool name, or description.
 
 `mcp_search` supports three modes:
 
