@@ -113,6 +113,132 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
 }
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
+const DEFERRED_SEARCH_TOOL = "mcp_search"
+const DEFERRED_LOAD_TOOL = "mcp_load"
+const DEFAULT_DEFERRED_SEARCH_LIMIT = 20
+const MAX_DEFERRED_SEARCH_LIMIT = 50
+
+function mcpToolKey(clientName: string, toolName: string) {
+  return sanitize(clientName) + "_" + sanitize(toolName)
+}
+
+function isMcpDeferred(entry: ConfigMCP.Info | undefined, cfg: Config.Info) {
+  return entry?.defer ?? cfg.experimental?.defer_mcp_tools ?? false
+}
+
+function textToolResult(text: string) {
+  return {
+    content: [{ type: "text" as const, text }],
+  }
+}
+
+function jsonToolResult(value: unknown) {
+  return textToolResult(JSON.stringify(value, null, 2))
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function readLimit(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_DEFERRED_SEARCH_LIMIT
+  return Math.max(1, Math.min(Math.floor(value), MAX_DEFERRED_SEARCH_LIMIT))
+}
+
+type DeferredToolMatch = {
+  server: string
+  name: string
+  tool: string
+  description: string
+  loaded: boolean
+  score: number
+}
+
+export function searchDeferredToolDefinitions(input: {
+  defs: Record<string, MCPToolDef[]>
+  selected: Record<string, Set<string>>
+  servers: string[]
+  query?: string
+  server?: string
+  limit?: number
+}) {
+  const tokens = input.query
+    ?.toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+  const serverFilter = input.server?.toLowerCase()
+  const limit = Math.max(1, Math.min(input.limit ?? DEFAULT_DEFERRED_SEARCH_LIMIT, MAX_DEFERRED_SEARCH_LIMIT))
+  const matches: DeferredToolMatch[] = []
+
+  for (const server of input.servers) {
+    if (serverFilter && server.toLowerCase() !== serverFilter && sanitize(server).toLowerCase() !== serverFilter) {
+      continue
+    }
+
+    for (const mcpTool of input.defs[server] ?? []) {
+      const description = mcpTool.description ?? ""
+      const tool = mcpToolKey(server, mcpTool.name)
+      const haystack = `${server} ${mcpTool.name} ${description}`.toLowerCase()
+      if (tokens?.length && !tokens.every((token) => haystack.includes(token))) continue
+
+      let score = 0
+      if (tokens?.length) {
+        for (const token of tokens) {
+          if (mcpTool.name.toLowerCase() === token) score += 20
+          else if (mcpTool.name.toLowerCase().includes(token)) score += 10
+          else if (server.toLowerCase().includes(token)) score += 5
+          else if (description.toLowerCase().includes(token)) score += 2
+        }
+      }
+
+      matches.push({
+        server,
+        name: mcpTool.name,
+        tool,
+        description,
+        loaded: input.selected[server]?.has(mcpTool.name) ?? false,
+        score,
+      })
+    }
+  }
+
+  return matches
+    .sort((a, b) => b.score - a.score || a.server.localeCompare(b.server) || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map(({ score: _score, ...match }) => match)
+}
+
+function findDeferredTool(input: {
+  defs: Record<string, MCPToolDef[]>
+  servers: string[]
+  server?: string
+  name?: string
+  tool?: string
+}) {
+  const requestedServer = input.server?.toLowerCase()
+  const requestedName = input.name?.toLowerCase()
+  const requestedTool = input.tool?.toLowerCase()
+
+  for (const server of input.servers) {
+    if (
+      requestedServer &&
+      server.toLowerCase() !== requestedServer &&
+      sanitize(server).toLowerCase() !== requestedServer
+    ) {
+      continue
+    }
+
+    for (const mcpTool of input.defs[server] ?? []) {
+      const key = mcpToolKey(server, mcpTool.name)
+      const name = mcpTool.name.toLowerCase()
+      if (requestedTool && key.toLowerCase() !== requestedTool) continue
+      if (requestedName && name !== requestedName && sanitize(mcpTool.name).toLowerCase() !== requestedName) continue
+      if (!requestedTool && !requestedName) continue
+      return { server, tool: mcpTool, key }
+    }
+  }
+}
 
 // Convert MCP tool definition to AI SDK Tool type
 function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
@@ -201,6 +327,7 @@ interface State {
   status: Record<string, Status>
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
+  selected: Record<string, Set<string>>
 }
 
 export interface Interface {
@@ -467,6 +594,13 @@ export const layer = Layer.effect(
         if (s.clients[name] !== client || s.status[name]?.status !== "connected") return
 
         s.defs[name] = listed
+        const selected = s.selected[name]
+        if (selected) {
+          const available = new Set(listed.map((tool) => tool.name))
+          for (const tool of selected) {
+            if (!available.has(tool)) selected.delete(tool)
+          }
+        }
         await bridge.promise(bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore))
       })
     }
@@ -480,6 +614,7 @@ export const layer = Layer.effect(
           status: {},
           clients: {},
           defs: {},
+          selected: {},
         }
 
         yield* Effect.forEach(
@@ -539,6 +674,7 @@ export const layer = Layer.effect(
     function closeClient(s: State, name: string) {
       const client = s.clients[name]
       delete s.defs[name]
+      delete s.selected[name]
       if (!client) return Effect.void
       return Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
     }
@@ -622,6 +758,7 @@ export const layer = Layer.effect(
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
       const defaultTimeout = cfg.experimental?.mcp_timeout
+      const deferredServers: string[] = []
 
       const connectedClients = Object.entries(s.clients).filter(
         ([clientName]) => s.status[clientName]?.status === "connected",
@@ -641,12 +778,139 @@ export const layer = Layer.effect(
             }
 
             const timeout = entry?.timeout ?? defaultTimeout
-            for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+            if (isMcpDeferred(entry, cfg)) {
+              deferredServers.push(clientName)
+            }
+
+            const selected = s.selected[clientName] ?? new Set<string>()
+            const available = isMcpDeferred(entry, cfg)
+              ? listed.filter((mcpTool) => selected.has(mcpTool.name))
+              : listed
+            for (const mcpTool of available) {
+              result[mcpToolKey(clientName, mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
             }
           }),
         { concurrency: "unbounded" },
       )
+
+      if (deferredServers.length > 0) {
+        result[DEFERRED_SEARCH_TOOL] = dynamicTool({
+          description:
+            "Search deferred MCP server tool catalogs. Use this before loading tools from large MCP servers; it returns compact candidates that can be activated with mcp_load.",
+          inputSchema: jsonSchema({
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Words to search for in MCP server names, tool names, and descriptions.",
+              },
+              server: {
+                type: "string",
+                description: "Optional MCP server name to search within.",
+              },
+              limit: {
+                type: "number",
+                description: `Maximum number of matches to return, capped at ${MAX_DEFERRED_SEARCH_LIMIT}.`,
+              },
+            },
+            additionalProperties: false,
+          }),
+          execute: async (args: unknown) => {
+            const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
+            const matches = searchDeferredToolDefinitions({
+              defs: s.defs,
+              selected: s.selected,
+              servers: deferredServers,
+              query: readString(input.query),
+              server: readString(input.server),
+              limit: readLimit(input.limit),
+            })
+
+            return jsonToolResult({
+              matches,
+              count: matches.length,
+              deferredServers,
+              next: "Call mcp_load with the `tool` value from a match, or with `server` and `name`.",
+            })
+          },
+        })
+
+        result[DEFERRED_LOAD_TOOL] = dynamicTool({
+          description:
+            "Activate one or more tools from deferred MCP servers. Loaded tools become available on the next assistant step.",
+          inputSchema: jsonSchema({
+            type: "object",
+            properties: {
+              tool: {
+                type: "string",
+                description: "A tool id returned by mcp_search, for example `github_create_issue`.",
+              },
+              tools: {
+                type: "array",
+                items: { type: "string" },
+                description: "Multiple tool ids returned by mcp_search.",
+              },
+              server: {
+                type: "string",
+                description: "MCP server name. Use with `name` when not passing `tool`.",
+              },
+              name: {
+                type: "string",
+                description: "Original MCP tool name. Use with `server` when not passing `tool`.",
+              },
+            },
+            additionalProperties: false,
+          }),
+          execute: async (args: unknown) => {
+            const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
+            const requested = [
+              ...(Array.isArray(input.tools) ? input.tools : [])
+                .filter((item): item is string => typeof item === "string")
+                .map((item) => item.trim()),
+              ...[readString(input.tool)].filter((item): item is string => !!item),
+            ].filter((item) => item.length > 0)
+            const loaded: Array<{ server: string; name: string; tool: string }> = []
+            const missing: string[] = []
+
+            if (requested.length === 0) {
+              const found = findDeferredTool({
+                defs: s.defs,
+                servers: deferredServers,
+                server: readString(input.server),
+                name: readString(input.name),
+              })
+              if (found) requested.push(found.key)
+              else missing.push([readString(input.server), readString(input.name)].filter(Boolean).join("/") || "tool")
+            }
+
+            for (const requestedTool of requested) {
+              const found = findDeferredTool({
+                defs: s.defs,
+                servers: deferredServers,
+                tool: requestedTool,
+              })
+              if (!found) {
+                missing.push(requestedTool)
+                continue
+              }
+
+              s.selected[found.server] ??= new Set<string>()
+              s.selected[found.server].add(found.tool.name)
+              loaded.push({ server: found.server, name: found.tool.name, tool: found.key })
+            }
+
+            return jsonToolResult({
+              loaded,
+              missing,
+              next:
+                loaded.length > 0
+                  ? "The loaded MCP tools will be available on the next assistant step."
+                  : "No tools were loaded. Call mcp_search to find available deferred MCP tools.",
+            })
+          },
+        })
+      }
+
       return result
     })
 

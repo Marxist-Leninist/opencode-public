@@ -598,6 +598,68 @@ test(
   ),
 )
 
+test(
+  "deferred MCP servers expose search/load before individual tools",
+  withInstance(
+    {
+      "deferred-server": {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "deferred-server"
+        const serverState = getOrCreateClientState("deferred-server")
+        serverState.tools = [
+          {
+            name: "memory_tags",
+            description: "List memory tags and labels",
+            inputSchema: { type: "object", properties: {} },
+          },
+          {
+            name: "vault_search",
+            description: "Search encrypted secrets",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ]
+
+        expect((yield* mcp.status())["deferred-server"]?.status).toBe("connected")
+
+        const before = yield* mcp.tools()
+        expect(before.mcp_search).toBeDefined()
+        expect(before.mcp_load).toBeDefined()
+        expect(before["deferred-server_memory_tags"]).toBeUndefined()
+        expect(before["deferred-server_vault_search"]).toBeUndefined()
+
+        const searchResult = (yield* Effect.promise(() =>
+          (before.mcp_search!.execute as any)({ query: "memory" }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const search = JSON.parse(searchResult.content[0]!.text) as {
+          matches: Array<{ server: string; name: string; tool: string }>
+        }
+        expect(search.matches[0]).toMatchObject({
+          server: "deferred-server",
+          name: "memory_tags",
+          tool: "deferred-server_memory_tags",
+        })
+
+        const loadResult = (yield* Effect.promise(() =>
+          (before.mcp_load!.execute as any)({ tool: search.matches[0]!.tool }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const load = JSON.parse(loadResult.content[0]!.text) as { loaded: Array<{ tool: string }> }
+        expect(load.loaded.map((item) => item.tool)).toContain("deferred-server_memory_tags")
+
+        const after = yield* mcp.tools()
+        expect(after.mcp_search).toBeDefined()
+        expect(after.mcp_load).toBeDefined()
+        expect(after["deferred-server_memory_tags"]).toBeDefined()
+        expect(after["deferred-server_vault_search"]).toBeUndefined()
+      }),
+  ),
+)
+
 // ========================================================================
 // Test: connect failure during create()
 // ========================================================================

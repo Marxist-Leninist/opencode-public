@@ -264,6 +264,10 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      defer_mcp_tools: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Expose MCP servers through deferred search/load tools by default instead of registering every MCP tool up front.",
+      }),
     }),
   ),
 })

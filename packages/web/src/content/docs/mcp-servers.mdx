@@ -9,6 +9,43 @@ Once added, MCP tools are automatically available to the LLM alongside built-in 
 
 ---
 
+## Deferred tools
+
+Large MCP servers can expose dozens or hundreds of tools. Set `defer` to `true` when you want OpenCode to keep that server's full tool catalog out of the model context until the agent needs it.
+
+```jsonc title="opencode.jsonc" {7}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "silicon_goddess": {
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "defer": true,
+    },
+  },
+}
+```
+
+When any connected server is deferred, OpenCode exposes two small tools instead:
+
+- `mcp_search` searches deferred MCP server names, tool names, and descriptions.
+- `mcp_load` activates selected tools. Loaded tools are available on the next assistant step.
+
+You can also make every MCP server deferred by default:
+
+```jsonc title="opencode.jsonc"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "experimental": {
+    "defer_mcp_tools": true,
+  },
+}
+```
+
+Set `"defer": false` on a specific server to opt it out of the global default.
+
+---
+
 #### Caveats
 
 When you use an MCP server, it adds to the context. This can quickly add up if you have a lot of tools. So we recommend being careful with which MCP servers you use.
@@ -116,13 +153,14 @@ use the mcp_everything tool to add the number 3 and 4
 
 Here are all the options for configuring a local MCP server.
 
-| Option        | Type    | Required | Description                                                                         |
-| ------------- | ------- | -------- | ----------------------------------------------------------------------------------- |
-| `type`        | String  | Y        | Type of MCP server connection, must be `"local"`.                                   |
-| `command`     | Array   | Y        | Command and arguments to run the MCP server.                                        |
-| `environment` | Object  |          | Environment variables to set when running the server.                               |
-| `enabled`     | Boolean |          | Enable or disable the MCP server on startup.                                        |
-| `timeout`     | Number  |          | Timeout in ms for fetching tools from the MCP server. Defaults to 5000 (5 seconds). |
+| Option        | Type    | Required | Description                                                                           |
+| ------------- | ------- | -------- | ------------------------------------------------------------------------------------- |
+| `type`        | String  | Y        | Type of MCP server connection, must be `"local"`.                                     |
+| `command`     | Array   | Y        | Command and arguments to run the MCP server.                                          |
+| `environment` | Object  |          | Environment variables to set when running the server.                                 |
+| `enabled`     | Boolean |          | Enable or disable the MCP server on startup.                                          |
+| `defer`       | Boolean |          | Search/load this server's tools on demand instead of registering every tool up front. |
+| `timeout`     | Number  |          | Timeout in ms for fetching tools from the MCP server. Defaults to 5000 (5 seconds).   |
 
 ---
 
@@ -152,14 +190,15 @@ The `url` is the URL of the remote MCP server and with the `headers` option you 
 
 #### Options
 
-| Option    | Type    | Required | Description                                                                         |
-| --------- | ------- | -------- | ----------------------------------------------------------------------------------- |
-| `type`    | String  | Y        | Type of MCP server connection, must be `"remote"`.                                  |
-| `url`     | String  | Y        | URL of the remote MCP server.                                                       |
-| `enabled` | Boolean |          | Enable or disable the MCP server on startup.                                        |
-| `headers` | Object  |          | Headers to send with the request.                                                   |
-| `oauth`   | Object  |          | OAuth authentication configuration. See [OAuth](#oauth) section below.              |
-| `timeout` | Number  |          | Timeout in ms for fetching tools from the MCP server. Defaults to 5000 (5 seconds). |
+| Option    | Type    | Required | Description                                                                           |
+| --------- | ------- | -------- | ------------------------------------------------------------------------------------- |
+| `type`    | String  | Y        | Type of MCP server connection, must be `"remote"`.                                    |
+| `url`     | String  | Y        | URL of the remote MCP server.                                                         |
+| `enabled` | Boolean |          | Enable or disable the MCP server on startup.                                          |
+| `defer`   | Boolean |          | Search/load this server's tools on demand instead of registering every tool up front. |
+| `headers` | Object  |          | Headers to send with the request.                                                     |
+| `oauth`   | Object  |          | OAuth authentication configuration. See [OAuth](#oauth) section below.                |
+| `timeout` | Number  |          | Timeout in ms for fetching tools from the MCP server. Defaults to 5000 (5 seconds).   |
 
 ---
 
