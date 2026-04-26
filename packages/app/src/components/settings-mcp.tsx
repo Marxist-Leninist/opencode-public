@@ -10,7 +10,10 @@ import { createMemo, type Component, For, Show, type JSX } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
-import { useSync } from "@/context/sync"
+// NOTE: Settings is a global dialog and is rendered outside any per-instance
+// SyncProvider, so we cannot use `useSync()` here. Live connect/disconnect
+// status is shown in the workspace status popover instead — this tab manages
+// CONFIG only.
 import { SettingsList } from "./settings-list"
 
 type DeferredMode = "smart" | "standard" | "augment"
@@ -104,7 +107,7 @@ const SettingsRow: Component<{
 export const SettingsMcp: Component = () => {
   const language = useLanguage()
   const globalSync = useGlobalSync()
-  const sync = useSync()
+  // sync (per-instance) is intentionally NOT used here; see import-site note.
 
   const [state, setState] = createStore({
     pending: "",
@@ -305,11 +308,11 @@ export const SettingsMcp: Component = () => {
     return updateEntry(name, patch, "MCP server saved", `save:${name}`)
   }
 
-  const status = (name: string) => sync.data.mcp?.[name]?.status ?? "not loaded"
-  const statusError = (name: string) => {
-    const item = sync.data.mcp?.[name]
-    if (item?.status === "failed" || item?.status === "needs_client_registration") return item.error
-  }
+  // Live connection status comes from the per-instance MCP service which is
+  // not available in the global Settings dialog. Show a stable placeholder
+  // and direct users to the in-session status popover for runtime state.
+  const status = (_name: string) => "configured"
+  const statusError = (_name: string) => undefined as string | undefined
   const isBusy = (key: string) => state.pending === key || state.pending === "global"
 
   return (
