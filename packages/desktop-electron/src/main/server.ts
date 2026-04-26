@@ -31,7 +31,7 @@ export function setWslConfig(config: WslConfig) {
 }
 
 export async function spawnLocalServer(hostname: string, port: number, password: string) {
-  prepareServerEnv(password)
+  prepareServerEnv(password, isLowResourceMode())
   const { Log, Server } = await import("virtual:opencode-server")
   await Log.init({ level: "WARN" })
   const listener = await Server.listen({
@@ -58,20 +58,26 @@ export async function spawnLocalServer(hostname: string, port: number, password:
   return { listener, health: { wait } }
 }
 
-function prepareServerEnv(password: string) {
+function prepareServerEnv(password: string, lowResource: boolean) {
   const shell = process.platform === "win32" ? null : getUserShell()
   const shellEnv = shell ? (loadShellEnv(shell) ?? {}) : {}
   const env = {
     ...process.env,
     ...shellEnv,
-    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
-    OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
+    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: lowResource ? "false" : "true",
+    OPENCODE_EXPERIMENTAL_FILEWATCHER: lowResource ? "false" : "true",
+    OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: lowResource ? "true" : (process.env.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER ?? "false"),
     OPENCODE_CLIENT: "desktop",
     OPENCODE_SERVER_USERNAME: "opencode",
     OPENCODE_SERVER_PASSWORD: password,
     XDG_STATE_HOME: app.getPath("userData"),
   }
   Object.assign(process.env, env)
+}
+
+function isLowResourceMode() {
+  const value = process.env.OPENCODE_DESKTOP_LOW_RESOURCE?.toLowerCase()
+  return value !== "false" && value !== "0"
 }
 
 export async function checkHealth(url: string, password?: string | null): Promise<boolean> {

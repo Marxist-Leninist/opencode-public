@@ -11,6 +11,11 @@ const channel = (() => {
 const OPENCODE_SERVER_DIST = "../opencode/dist/node"
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
+const fastBuild = process.env.OPENCODE_FAST_BUILD === "true" || process.env.OPENCODE_FAST_BUILD === "1"
+const buildDefaults = {
+  minify: fastBuild ? false : undefined,
+  sourcemap: false,
+}
 
 export default defineConfig({
   main: {
@@ -18,6 +23,7 @@ export default defineConfig({
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
     },
     build: {
+      ...buildDefaults,
       rollupOptions: {
         input: { index: "src/main/index.ts" },
       },
@@ -51,6 +57,7 @@ export default defineConfig({
   },
   preload: {
     build: {
+      ...buildDefaults,
       rollupOptions: {
         input: { index: "src/preload/index.ts" },
         output: {
@@ -68,6 +75,7 @@ export default defineConfig({
       "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
     },
     build: {
+      ...buildDefaults,
       rollupOptions: {
         input: {
           main: "src/renderer/index.html",

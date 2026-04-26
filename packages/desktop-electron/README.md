@@ -1,6 +1,6 @@
 # OpenCode Desktop
 
-Native OpenCode desktop app, built with Tauri v2.
+Native OpenCode desktop app, built with Electron.
 
 ## Development
 
@@ -8,25 +8,31 @@ From the repo root:
 
 ```bash
 bun install
-bun run --cwd packages/desktop tauri dev
+bun run dev:desktop
 ```
 
-This starts the Vite dev server on http://localhost:1420 and opens the native window.
+## Low-Resource Mode
 
-If you only want the web dev server (no native shell):
+The desktop app defaults to low-resource mode for lower-RAM machines. In this mode
+the sidecar disables full-tree file watching and icon discovery, and Electron caps
+renderer V8 heap growth.
+
+Set this to restore the heavier default behavior:
 
 ```bash
-bun run --cwd packages/desktop dev
+OPENCODE_DESKTOP_LOW_RESOURCE=false bun run dev:desktop
 ```
 
-## Build
+## Fast Local Builds
 
-To create a production `dist/` and build the native app bundle:
+Use the fast scripts for local iteration. They skip sourcemaps and minification in
+the Electron build:
 
 ```bash
-bun run --cwd packages/desktop tauri build
+bun run --cwd packages/desktop-electron build:fast
+bun run --cwd packages/desktop-electron package:win:fast
 ```
 
-## Prerequisites
-
-Running the desktop app requires additional Tauri dependencies (Rust toolchain, platform-specific libraries). See the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for setup instructions.
+The OpenCode sidecar build used by the desktop package already avoids embedding
+the web UI; the standalone CLI build can also use `--skip-embed-web-ui` for faster
+local binaries.

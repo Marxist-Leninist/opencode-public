@@ -74,6 +74,13 @@ setupApp()
 function setupApp() {
   ensureLoopbackNoProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
+  if (isLowResourceMode()) {
+    app.commandLine.appendSwitch(
+      "disable-features",
+      ["BackForwardCache", "CalculateNativeWinOcclusion", "SpareRendererForSitePerProcess"].join(","),
+    )
+    app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512")
+  }
 
   if (!app.requestSingleInstanceLock()) {
     app.quit()
@@ -117,6 +124,11 @@ function setupApp() {
     setupAutoUpdater()
     await initialize()
   })
+}
+
+function isLowResourceMode() {
+  const value = process.env.OPENCODE_DESKTOP_LOW_RESOURCE?.toLowerCase()
+  return value !== "false" && value !== "0"
 }
 
 function emitDeepLinks(urls: string[]) {
