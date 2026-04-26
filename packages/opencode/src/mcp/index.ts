@@ -1,4 +1,4 @@
-import { dynamicTool, type Tool, jsonSchema, type JSONSchema7 } from "ai"
+import { dynamicTool, generateText, type Tool, jsonSchema, type JSONSchema7 } from "ai"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
@@ -11,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "../config"
 import { ConfigMCP } from "../config/mcp"
+import { Provider } from "../provider"
 import { Log } from "../util"
 import { NamedError } from "@opencode-ai/core/util/error"
 import z from "zod/v4"
@@ -117,6 +118,72 @@ const DEFERRED_SEARCH_TOOL = "mcp_search"
 const DEFERRED_LOAD_TOOL = "mcp_load"
 const DEFAULT_DEFERRED_SEARCH_LIMIT = 20
 const MAX_DEFERRED_SEARCH_LIMIT = 50
+const DEFAULT_DEFERRED_SEARCH_MODE: DeferredSearchMode = "smart"
+
+type DeferredSearchMode = "standard" | "smart" | "augment"
+
+const SEARCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "for",
+  "from",
+  "get",
+  "i",
+  "in",
+  "is",
+  "me",
+  "need",
+  "of",
+  "on",
+  "please",
+  "the",
+  "this",
+  "to",
+  "tool",
+  "use",
+  "want",
+  "what",
+  "with",
+])
+
+const SMART_SEARCH_ALIASES: Record<string, string[]> = {
+  api: ["key", "token", "credential", "secret", "memory_secrets", "vault"],
+  balance: ["budget", "cost", "spend", "billing"],
+  chat: ["message", "dm", "channel", "roster", "claim"],
+  cook: ["microwave", "food", "heat", "frozen", "cook"],
+  cooking: ["microwave", "food", "heat", "frozen", "cook"],
+  credential: ["secret", "key", "token", "vault", "memory_secrets"],
+  error: ["logs", "status", "health", "cluster"],
+  food: ["microwave", "cook", "frozen", "heat"],
+  gpu: ["vast", "job", "instance"],
+  health: ["status", "mcp", "cluster", "service"],
+  key: ["secret", "token", "credential", "vault", "memory_secrets"],
+  keys: ["secret", "token", "credential", "vault", "memory_secrets"],
+  log: ["logs", "journal", "status"],
+  logs: ["journal", "status", "cluster"],
+  meal: ["microwave", "cook", "food", "heat"],
+  memory: ["slot", "slots", "tag", "tags", "outline", "search"],
+  model: ["llm", "provider", "route"],
+  money: ["budget", "cost", "spend", "balance"],
+  oven: ["microwave", "cook", "heat", "food"],
+  password: ["secret", "key", "token", "credential", "vault"],
+  ping: ["status", "health"],
+  price: ["budget", "cost", "spend"],
+  secret: ["key", "token", "credential", "vault", "memory_secrets"],
+  secrets: ["key", "token", "credential", "vault", "memory_secrets"],
+  server: ["status", "health", "mcp", "cluster"],
+  service: ["status", "health", "logs"],
+  sms: ["text", "message", "phone"],
+  spend: ["budget", "cost", "balance"],
+  status: ["health", "mcp", "cluster", "service"],
+  tag: ["tags", "memory", "slot"],
+  tags: ["tag", "memory", "slot"],
+  token: ["secret", "key", "credential", "vault", "memory_secrets"],
+  tokens: ["secret", "key", "credential", "vault", "memory_secrets"],
+  vault: ["secret", "key", "token", "credential"],
+}
 
 function mcpToolKey(clientName: string, toolName: string) {
   return sanitize(clientName) + "_" + sanitize(toolName)
@@ -124,6 +191,17 @@ function mcpToolKey(clientName: string, toolName: string) {
 
 function isMcpDeferred(entry: ConfigMCP.Info | undefined, cfg: Config.Info) {
   return entry?.defer ?? cfg.experimental?.defer_mcp_tools ?? false
+}
+
+function configuredDeferredSearchMode(cfg: Config.Info): DeferredSearchMode {
+  const mode = cfg.experimental?.defer_mcp_tools_search?.mode
+  if (mode === "standard" || mode === "smart" || mode === "augment") return mode
+  return DEFAULT_DEFERRED_SEARCH_MODE
+}
+
+function readSearchMode(value: unknown, cfg: Config.Info): DeferredSearchMode {
+  if (value === "standard" || value === "smart" || value === "augment") return value
+  return configuredDeferredSearchMode(cfg)
 }
 
 function textToolResult(text: string) {
@@ -145,6 +223,36 @@ function readLimit(value: unknown) {
   return Math.max(1, Math.min(Math.floor(value), MAX_DEFERRED_SEARCH_LIMIT))
 }
 
+function searchTokens(value: string | undefined) {
+  if (!value) return []
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_./:-]+/g, " ")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !SEARCH_STOP_WORDS.has(token))
+}
+
+function expandSmartTokens(tokens: string[]) {
+  const result = new Set<string>()
+  for (const token of tokens) {
+    result.add(token)
+    if (token.endsWith("s") && token.length > 3) result.add(token.slice(0, -1))
+    if (token.endsWith("ing") && token.length > 5) result.add(token.slice(0, -3))
+    for (const alias of SMART_SEARCH_ALIASES[token] ?? []) {
+      for (const item of searchTokens(alias)) {
+        result.add(item)
+      }
+    }
+  }
+  return Array.from(result)
+}
+
+function containsTerm(haystack: string, terms: Set<string>, term: string) {
+  return terms.has(term) || haystack.includes(term)
+}
+
 type DeferredToolMatch = {
   server: string
   name: string
@@ -161,12 +269,11 @@ export function searchDeferredToolDefinitions(input: {
   query?: string
   server?: string
   limit?: number
+  mode?: "standard" | "smart"
 }) {
-  const tokens = input.query
-    ?.toLowerCase()
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
+  const mode = input.mode ?? DEFAULT_DEFERRED_SEARCH_MODE
+  const tokens = searchTokens(input.query)
+  const expandedTokens = mode === "smart" ? expandSmartTokens(tokens) : tokens
   const serverFilter = input.server?.toLowerCase()
   const limit = Math.max(1, Math.min(input.limit ?? DEFAULT_DEFERRED_SEARCH_LIMIT, MAX_DEFERRED_SEARCH_LIMIT))
   const matches: DeferredToolMatch[] = []
@@ -179,16 +286,43 @@ export function searchDeferredToolDefinitions(input: {
     for (const mcpTool of input.defs[server] ?? []) {
       const description = mcpTool.description ?? ""
       const tool = mcpToolKey(server, mcpTool.name)
+      const nameTerms = new Set(searchTokens(mcpTool.name))
+      const serverTerms = new Set(searchTokens(server))
+      const descriptionTerms = new Set(searchTokens(description))
       const haystack = `${server} ${mcpTool.name} ${description}`.toLowerCase()
-      if (tokens?.length && !tokens.every((token) => haystack.includes(token))) continue
+
+      if (tokens.length) {
+        if (mode === "standard" && !tokens.every((token) => haystack.includes(token))) continue
+        if (mode === "smart" && !expandedTokens.some((token) => containsTerm(haystack, nameTerms, token))) {
+          const matchedServer = expandedTokens.some((token) => containsTerm(server.toLowerCase(), serverTerms, token))
+          const matchedDescription = expandedTokens.some((token) =>
+            containsTerm(description.toLowerCase(), descriptionTerms, token),
+          )
+          if (!matchedServer && !matchedDescription) continue
+        }
+      }
 
       let score = 0
-      if (tokens?.length) {
+      if (tokens.length) {
+        const normalizedQuery = tokens.join(" ")
+        const normalizedName = searchTokens(mcpTool.name).join(" ")
+        if (normalizedName === normalizedQuery) score += 100
+        else if (normalizedName.includes(normalizedQuery)) score += 50
+
         for (const token of tokens) {
-          if (mcpTool.name.toLowerCase() === token) score += 20
+          if (nameTerms.has(token)) score += 20
           else if (mcpTool.name.toLowerCase().includes(token)) score += 10
-          else if (server.toLowerCase().includes(token)) score += 5
-          else if (description.toLowerCase().includes(token)) score += 2
+          if (serverTerms.has(token)) score += 6
+          if (descriptionTerms.has(token)) score += 3
+        }
+
+        if (mode === "smart") {
+          for (const token of expandedTokens) {
+            if (tokens.includes(token)) continue
+            if (nameTerms.has(token)) score += 8
+            else if (mcpTool.name.toLowerCase().includes(token)) score += 5
+            if (descriptionTerms.has(token)) score += 2
+          }
         }
       }
 
@@ -238,6 +372,32 @@ function findDeferredTool(input: {
       return { server, tool: mcpTool, key }
     }
   }
+}
+
+function parseAugmentedSearchTools(text: string) {
+  const stripped = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+  const candidates = [stripped]
+  const start = stripped.indexOf("{")
+  const end = stripped.lastIndexOf("}")
+  if (start >= 0 && end > start) candidates.push(stripped.slice(start, end + 1))
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as { tools?: unknown }
+      if (!Array.isArray(parsed.tools)) continue
+      return parsed.tools.flatMap((item) => {
+        if (typeof item === "string") return [item]
+        if (item && typeof item === "object" && typeof (item as { tool?: unknown }).tool === "string") {
+          return [(item as { tool: string }).tool]
+        }
+        return []
+      })
+    } catch {}
+  }
+  return []
 }
 
 // Convert MCP tool definition to AI SDK Tool type
@@ -365,6 +525,8 @@ export const layer = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const auth = yield* McpAuth.Service
     const bus = yield* Bus.Service
+    const provider = yield* Effect.serviceOption(Provider.Service)
+    const bridge = yield* EffectBridge.make()
 
     type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
 
@@ -559,6 +721,104 @@ export const layer = Layer.effect(
       return { mcpClient, status, defs: listed } satisfies CreateResult
     })
     const cfgSvc = yield* Config.Service
+
+    const augmentDeferredMatches = Effect.fn("MCP.augmentDeferredMatches")(function* (input: {
+      query?: string
+      matches: Array<Omit<DeferredToolMatch, "score">>
+      limit: number
+      model?: string
+    }) {
+      if (!input.query || input.matches.length <= 1) {
+        return { matches: input.matches.slice(0, input.limit), augmented: false as const }
+      }
+      if (Option.isNone(provider)) {
+        return {
+          matches: input.matches.slice(0, input.limit),
+          augmented: false as const,
+          warning: "Provider service unavailable; used smart search results.",
+        }
+      }
+
+      return yield* Effect.gen(function* () {
+        const cfg = yield* cfgSvc.get()
+        const configuredModel = input.model ?? cfg.experimental?.defer_mcp_tools_search?.model
+        const modelRef = configuredModel ? Provider.parseModel(configuredModel) : yield* provider.value.defaultModel()
+        const model = yield* provider.value.getModel(modelRef.providerID, modelRef.modelID)
+        const language = yield* provider.value.getLanguage(model)
+        const candidates = input.matches.slice(0, MAX_DEFERRED_SEARCH_LIMIT).map((match, index) => ({
+          rank: index + 1,
+          tool: match.tool,
+          server: match.server,
+          name: match.name,
+          description: match.description.slice(0, 400),
+          loaded: match.loaded,
+        }))
+
+        const generated = yield* Effect.tryPromise({
+          try: () =>
+            generateText({
+              model: language,
+              temperature: 0,
+              maxOutputTokens: 600,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    'Rank MCP tools for the user search query. Return JSON only in this exact shape: {"tools":["tool_id"]}. Return only tool ids from the provided candidates, best first. Prefer exact task fit over broad category matches.',
+                },
+                {
+                  role: "user",
+                  content: JSON.stringify({
+                    instruction: 'Return JSON only, for example {"tools":["server_tool_name"]}.',
+                    query: input.query,
+                    limit: input.limit,
+                    candidates,
+                  }),
+                },
+              ],
+            }),
+          catch: (error) => error,
+        })
+        const rankedTools = parseAugmentedSearchTools(generated.text)
+        if (rankedTools.length === 0) {
+          return {
+            matches: input.matches.slice(0, input.limit),
+            augmented: false as const,
+            warning: "Augment model returned no valid tool ids; used smart search results.",
+          }
+        }
+
+        const byTool = new Map(input.matches.map((match) => [match.tool, match]))
+        const seen = new Set<string>()
+        const ranked: Array<Omit<DeferredToolMatch, "score">> = []
+        for (const tool of rankedTools) {
+          const match = byTool.get(tool)
+          if (!match || seen.has(match.tool)) continue
+          seen.add(match.tool)
+          ranked.push(match)
+        }
+        for (const match of input.matches) {
+          if (ranked.length >= input.limit) break
+          if (seen.has(match.tool)) continue
+          seen.add(match.tool)
+          ranked.push(match)
+        }
+
+        return {
+          matches: ranked.slice(0, input.limit),
+          augmented: true as const,
+          model: `${model.providerID}/${model.id}`,
+        }
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.succeed({
+            matches: input.matches.slice(0, input.limit),
+            augmented: false as const,
+            warning: String(error),
+          }),
+        ),
+      )
+    })
 
     const descendants = Effect.fnUntraced(
       function* (pid: number) {
@@ -812,23 +1072,57 @@ export const layer = Layer.effect(
                 type: "number",
                 description: `Maximum number of matches to return, capped at ${MAX_DEFERRED_SEARCH_LIMIT}.`,
               },
+              mode: {
+                type: "string",
+                enum: ["standard", "smart", "augment"],
+                description:
+                  "Search mode. standard uses strict token matching, smart uses local query expansion and ranking, augment reranks smart matches with an LLM.",
+              },
+              model: {
+                type: "string",
+                description:
+                  "Optional provider/model id for augment mode, for example `deepseek/deepseek-v4-pro`. Overrides the configured augment model.",
+              },
             },
             additionalProperties: false,
           }),
           execute: async (args: unknown) => {
             const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
-            const matches = searchDeferredToolDefinitions({
+            const mode = readSearchMode(input.mode, cfg)
+            const query = readString(input.query)
+            const limit = readLimit(input.limit)
+            const prefilterLimit =
+              mode === "augment" ? Math.max(limit, Math.min(MAX_DEFERRED_SEARCH_LIMIT, limit * 4)) : limit
+            let matches = searchDeferredToolDefinitions({
               defs: s.defs,
               selected: s.selected,
               servers: deferredServers,
-              query: readString(input.query),
+              query,
               server: readString(input.server),
-              limit: readLimit(input.limit),
+              limit: prefilterLimit,
+              mode: mode === "standard" ? "standard" : "smart",
             })
+            const augmentation =
+              mode === "augment"
+                ? await bridge.promise(
+                    augmentDeferredMatches({
+                      query,
+                      matches,
+                      limit,
+                      model: readString(input.model),
+                    }),
+                  )
+                : { matches: matches.slice(0, limit), augmented: false as const }
+            matches = augmentation.matches
+            const augmentationMeta = augmentation as unknown as { model?: string; warning?: string }
 
             return jsonToolResult({
               matches,
               count: matches.length,
+              mode,
+              augmented: augmentation.augmented,
+              ...(augmentationMeta.model ? { model: augmentationMeta.model } : {}),
+              ...(augmentationMeta.warning ? { warning: augmentationMeta.warning } : {}),
               deferredServers,
               next: "Call mcp_load with the `tool` value from a match, or with `server` and `name`.",
             })
@@ -1174,6 +1468,15 @@ export const defaultLayer = layer.pipe(
   Layer.provide(McpAuth.layer),
   Layer.provide(Bus.layer),
   Layer.provide(Config.defaultLayer),
+  Layer.provide(CrossSpawnSpawner.defaultLayer),
+  Layer.provide(AppFileSystem.defaultLayer),
+)
+
+export const defaultLayerWithProvider = layer.pipe(
+  Layer.provide(McpAuth.layer),
+  Layer.provide(Bus.layer),
+  Layer.provide(Config.defaultLayer),
+  Layer.provide(Provider.defaultLayer),
   Layer.provide(CrossSpawnSpawner.defaultLayer),
   Layer.provide(AppFileSystem.defaultLayer),
 )

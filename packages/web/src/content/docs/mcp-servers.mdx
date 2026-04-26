@@ -31,6 +31,14 @@ When any connected server is deferred, OpenCode exposes two small tools instead:
 - `mcp_search` searches deferred MCP server names, tool names, and descriptions.
 - `mcp_load` activates selected tools. Loaded tools are available on the next assistant step.
 
+`mcp_search` supports three modes:
+
+| Mode       | Description                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| `smart`    | Default. Uses local query expansion and ranking without spending model tokens.                   |
+| `standard` | Strict token matching for deterministic searches.                                                |
+| `augment`  | Uses the smart results as candidates, then reranks them with a configured or per-call LLM model. |
+
 You can also make every MCP server deferred by default:
 
 ```jsonc title="opencode.jsonc"
@@ -38,11 +46,15 @@ You can also make every MCP server deferred by default:
   "$schema": "https://opencode.ai/config.json",
   "experimental": {
     "defer_mcp_tools": true,
+    "defer_mcp_tools_search": {
+      "mode": "smart",
+      "model": "deepseek/deepseek-v4-pro",
+    },
   },
 }
 ```
 
-Set `"defer": false` on a specific server to opt it out of the global default.
+Set `"defer": false` on a specific server to opt it out of the global default. The configured `model` is only used when the search mode is `augment`; `smart` remains the default so discovery does not spend model tokens unless requested.
 
 ---
 

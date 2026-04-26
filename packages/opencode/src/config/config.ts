@@ -268,6 +268,17 @@ export const Info = Schema.Struct({
         description:
           "Expose MCP servers through deferred search/load tools by default instead of registering every MCP tool up front.",
       }),
+      defer_mcp_tools_search: Schema.optional(
+        Schema.Struct({
+          mode: Schema.optional(Schema.Literals(["standard", "smart", "augment"])).annotate({
+            description:
+              "Default deferred MCP search mode. standard is strict token matching, smart is local ranking, augment uses a configured model to rerank.",
+          }),
+          model: Schema.optional(ConfigModelID).annotate({
+            description: "Model to use for deferred MCP search augmentation, in provider/model format.",
+          }),
+        }),
+      ),
     }),
   ),
 })

@@ -623,6 +623,11 @@ test(
             description: "Search encrypted secrets",
             inputSchema: { type: "object", properties: {} },
           },
+          {
+            name: "microwave_calc",
+            description: "Calculate microwave cooking time for frozen food by weight",
+            inputSchema: { type: "object", properties: {} },
+          },
         ]
 
         expect((yield* mcp.status())["deferred-server"]?.status).toBe("connected")
@@ -644,6 +649,26 @@ test(
           name: "memory_tags",
           tool: "deferred-server_memory_tags",
         })
+
+        const smartResult = (yield* Effect.promise(() =>
+          (before.mcp_search!.execute as any)({ query: "cook frozen sausage", mode: "smart" }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const smart = JSON.parse(smartResult.content[0]!.text) as {
+          matches: Array<{ server: string; name: string; tool: string }>
+          mode: string
+        }
+        expect(smart.mode).toBe("smart")
+        expect(smart.matches[0]).toMatchObject({
+          name: "microwave_calc",
+          tool: "deferred-server_microwave_calc",
+        })
+
+        const standardResult = (yield* Effect.promise(() =>
+          (before.mcp_search!.execute as any)({ query: "cook frozen sausage", mode: "standard" }),
+        )) as { content: Array<{ type: "text"; text: string }> }
+        const standard = JSON.parse(standardResult.content[0]!.text) as { matches: unknown[]; mode: string }
+        expect(standard.mode).toBe("standard")
+        expect(standard.matches).toHaveLength(0)
 
         const loadResult = (yield* Effect.promise(() =>
           (before.mcp_load!.execute as any)({ tool: search.matches[0]!.tool }),
