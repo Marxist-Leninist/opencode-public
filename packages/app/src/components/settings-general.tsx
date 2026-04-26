@@ -51,13 +51,13 @@ const stopDemoSound = () => {
   demoSoundState.cleanup = undefined
 }
 
-const playDemoSound = (id: string | undefined) => {
+const playDemoSound = (id: string | undefined, volume = 1) => {
   stopDemoSound()
   if (!id) return
 
   const run = ++demoSoundState.run
   demoSoundState.timeout = setTimeout(() => {
-    void playSoundById(id).then((cleanup) => {
+    void playSoundById(id, volume).then((cleanup) => {
       if (demoSoundState.run !== run) {
         cleanup?.()
         return
@@ -189,6 +189,7 @@ export const SettingsGeneral: Component = () => {
     current: () => string,
     setEnabled: (value: boolean) => void,
     set: (id: string) => void,
+    volume: () => number,
   ) => ({
     options: soundOptions,
     current: enabled() ? (soundOptions.find((o) => o.id === current()) ?? noneSound) : noneSound,
@@ -196,7 +197,7 @@ export const SettingsGeneral: Component = () => {
     label: (o: (typeof soundOptions)[number]) => language.t(o.label),
     onHighlight: (option: (typeof soundOptions)[number] | undefined) => {
       if (!option) return
-      playDemoSound(option.id === "none" ? undefined : option.id)
+      playDemoSound(option.id === "none" ? undefined : option.id, volume())
     },
     onSelect: (option: (typeof soundOptions)[number] | undefined) => {
       if (!option) return
@@ -207,12 +208,40 @@ export const SettingsGeneral: Component = () => {
       }
       setEnabled(true)
       set(option.id)
-      playDemoSound(option.id)
+      playDemoSound(option.id, volume())
     },
     variant: "secondary" as const,
     size: "small" as const,
     triggerVariant: "settings" as const,
   })
+
+  const percent = (value: number) => `${Math.round(value * 100)}%`
+
+  const VolumeControl: Component<{
+    title: string
+    description: string
+    value: () => number
+    onChange: (value: number) => void
+    action: string
+  }> = (props) => (
+    <SettingsRow title={props.title} description={props.description}>
+      <div data-action={props.action} class="flex w-full max-w-[260px] items-center gap-3">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={Math.round(props.value() * 100)}
+          onInput={(event) => props.onChange(Number(event.currentTarget.value) / 100)}
+          class="h-5 min-w-0 flex-1 accent-current"
+          aria-label={props.title}
+        />
+        <span class="w-10 shrink-0 text-right text-12-regular tabular-nums text-text-weak">
+          {percent(props.value())}
+        </span>
+      </div>
+    </SettingsRow>
+  )
 
   const GeneralSection = () => (
     <div class="flex flex-col gap-1">
@@ -541,6 +570,14 @@ export const SettingsGeneral: Component = () => {
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.sounds")}</h3>
 
       <SettingsList>
+        <VolumeControl
+          title={language.t("settings.general.sounds.masterVolume.title")}
+          description={language.t("settings.general.sounds.masterVolume.description")}
+          value={() => settings.sounds.masterVolume()}
+          onChange={(value) => settings.sounds.setMasterVolume(value)}
+          action="settings-sounds-master-volume"
+        />
+
         <SettingsRow
           title={language.t("settings.general.sounds.agent.title")}
           description={language.t("settings.general.sounds.agent.description")}
@@ -552,9 +589,17 @@ export const SettingsGeneral: Component = () => {
               () => settings.sounds.agent(),
               (value) => settings.sounds.setAgentEnabled(value),
               (id) => settings.sounds.setAgent(id),
+              () => settings.sounds.masterVolume() * settings.sounds.agentVolume(),
             )}
           />
         </SettingsRow>
+        <VolumeControl
+          title={language.t("settings.general.sounds.agentVolume.title")}
+          description={language.t("settings.general.sounds.agentVolume.description")}
+          value={() => settings.sounds.agentVolume()}
+          onChange={(value) => settings.sounds.setAgentVolume(value)}
+          action="settings-sounds-agent-volume"
+        />
 
         <SettingsRow
           title={language.t("settings.general.sounds.permissions.title")}
@@ -567,9 +612,17 @@ export const SettingsGeneral: Component = () => {
               () => settings.sounds.permissions(),
               (value) => settings.sounds.setPermissionsEnabled(value),
               (id) => settings.sounds.setPermissions(id),
+              () => settings.sounds.masterVolume() * settings.sounds.permissionsVolume(),
             )}
           />
         </SettingsRow>
+        <VolumeControl
+          title={language.t("settings.general.sounds.permissionsVolume.title")}
+          description={language.t("settings.general.sounds.permissionsVolume.description")}
+          value={() => settings.sounds.permissionsVolume()}
+          onChange={(value) => settings.sounds.setPermissionsVolume(value)}
+          action="settings-sounds-permissions-volume"
+        />
 
         <SettingsRow
           title={language.t("settings.general.sounds.errors.title")}
@@ -582,9 +635,17 @@ export const SettingsGeneral: Component = () => {
               () => settings.sounds.errors(),
               (value) => settings.sounds.setErrorsEnabled(value),
               (id) => settings.sounds.setErrors(id),
+              () => settings.sounds.masterVolume() * settings.sounds.errorsVolume(),
             )}
           />
         </SettingsRow>
+        <VolumeControl
+          title={language.t("settings.general.sounds.errorsVolume.title")}
+          description={language.t("settings.general.sounds.errorsVolume.description")}
+          value={() => settings.sounds.errorsVolume()}
+          onChange={(value) => settings.sounds.setErrorsVolume(value)}
+          action="settings-sounds-errors-volume"
+        />
       </SettingsList>
     </div>
   )

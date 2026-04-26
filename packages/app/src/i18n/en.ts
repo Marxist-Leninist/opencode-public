@@ -839,10 +839,18 @@ export const dict = {
 
   "settings.general.sounds.agent.title": "Agent",
   "settings.general.sounds.agent.description": "Play sound when the agent is complete or needs attention",
+  "settings.general.sounds.masterVolume.title": "Master volume",
+  "settings.general.sounds.masterVolume.description": "Overall volume for all sound effects",
+  "settings.general.sounds.agentVolume.title": "Agent volume",
+  "settings.general.sounds.agentVolume.description": "Volume for agent-complete and attention sounds",
   "settings.general.sounds.permissions.title": "Permissions",
   "settings.general.sounds.permissions.description": "Play sound when a permission is required",
+  "settings.general.sounds.permissionsVolume.title": "Permissions volume",
+  "settings.general.sounds.permissionsVolume.description": "Volume for permission request sounds",
   "settings.general.sounds.errors.title": "Errors",
   "settings.general.sounds.errors.description": "Play sound when an error occurs",
+  "settings.general.sounds.errorsVolume.title": "Errors volume",
+  "settings.general.sounds.errorsVolume.description": "Volume for error sounds",
 
   "settings.shortcuts.title": "Keyboard shortcuts",
   "settings.shortcuts.reset.button": "Reset to defaults",

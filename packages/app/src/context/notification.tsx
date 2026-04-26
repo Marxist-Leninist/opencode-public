@@ -234,7 +234,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         if (session.parentID) return
 
         if (settings.sounds.agentEnabled()) {
-          void playSoundById(settings.sounds.agent())
+          void playSoundById(settings.sounds.agent(), settings.sounds.masterVolume() * settings.sounds.agentVolume())
         }
 
         append({
@@ -263,7 +263,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         if (session?.parentID) return
 
         if (settings.sounds.errorsEnabled()) {
-          void playSoundById(settings.sounds.errors())
+          void playSoundById(settings.sounds.errors(), settings.sounds.masterVolume() * settings.sounds.errorsVolume())
         }
 
         const error = "error" in event.properties ? event.properties.error : undefined

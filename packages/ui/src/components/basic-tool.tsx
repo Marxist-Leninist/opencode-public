@@ -1,6 +1,5 @@
 import { createEffect, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { animate, type AnimationPlaybackControls } from "motion"
-import { useI18n } from "../context/i18n"
 import { createStore } from "solid-js/store"
 import { Collapsible } from "./collapsible"
 import type { IconProps } from "./icon"
@@ -260,24 +259,110 @@ function args(input: Record<string, unknown> | undefined) {
     .slice(0, 3)
 }
 
+function humanizeToolName(tool: string) {
+  const trimmed = tool.replace(/^(?:sg1|sg2|sg|mcp)_/i, "")
+  const words = trimmed
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!words) return tool
+  if (words.toLowerCase() === "search") return "MCP search"
+  return words.replace(/\b[a-z]/g, (char) => char.toUpperCase())
+}
+
+/**
+ * Extract the MCP server / namespace prefix from a tool id.
+ * MCP tools land here as `<server>_<tool_name>`, e.g. `sg2_microwave_calc`,
+ * `github_create_issue`, `mcp_search`. Returns the lowercase prefix or
+ * undefined if the tool name has no underscore.
+ */
+function mcpServerPrefix(tool: string) {
+  const match = /^([a-z][a-z0-9-]*)_/i.exec(tool)
+  if (!match) return undefined
+  return match[1].toLowerCase()
+}
+
+function isEmptyRecord(value: Record<string, unknown> | undefined) {
+  return !value || Object.keys(value).length === 0
+}
+
+function formatPayload(value: unknown) {
+  if (value === undefined || value === null) return ""
+  if (typeof value === "string") {
+    const text = value.trim()
+    if (!text) return ""
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2)
+    } catch {
+      return value
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function GenericToolBlock(props: { title: string; value: string }) {
+  return (
+    <Show when={props.value}>
+      <div data-component="generic-tool-block">
+        <div data-slot="generic-tool-block-title">{props.title}</div>
+        <pre data-slot="generic-tool-block-pre" data-scrollable>
+          {props.value}
+        </pre>
+      </div>
+    </Show>
+  )
+}
+
 export function GenericTool(props: {
   tool: string
   status?: string
   hideDetails?: boolean
   input?: Record<string, unknown>
+  output?: string
+  defaultOpen?: boolean
 }) {
-  const i18n = useI18n()
+  const request = () => (isEmptyRecord(props.input) ? "" : formatPayload(props.input))
+  const response = () => formatPayload(props.output)
+  const hasDetails = () => !!request() || !!response()
+  // MCP tool calls (anything that fell through to the generic renderer with
+  // a `server_tool` shape) are conversational results worth showing inline,
+  // so we open them by default up to a much higher size cap. Built-in tool
+  // overrides have their own renderers and never hit this code path.
+  const server = () => mcpServerPrefix(props.tool)
+  const isMcp = () => server() !== undefined
+  const sizeCap = () => (isMcp() ? 64_000 : 16_000)
+  const defaultOpen = () => props.defaultOpen ?? (hasDetails() && request().length + response().length <= sizeCap())
+  const title = () => humanizeToolName(props.tool)
+  // For MCP, use the server name as a stable subtitle (e.g. "from sg2"),
+  // and skip the noisy inline arg list since the Request block below shows
+  // the full structured input. For non-MCP fallback, keep the original
+  // subtitle/args behavior.
+  const subtitle = () => (isMcp() ? `from ${server()}` : label(props.input))
+  const triggerArgs = () => (isMcp() ? [] : args(props.input))
 
   return (
     <BasicTool
       icon="mcp"
       status={props.status}
       trigger={{
-        title: i18n.t("ui.basicTool.called", { tool: props.tool }),
-        subtitle: label(props.input),
-        args: args(props.input),
+        title: title(),
+        subtitle: subtitle(),
+        args: triggerArgs(),
       }}
       hideDetails={props.hideDetails}
-    />
+      defaultOpen={defaultOpen()}
+      defer
+    >
+      {hasDetails() ? (
+        <div data-component="generic-tool-details">
+          <GenericToolBlock title="Request" value={request()} />
+          <GenericToolBlock title="Response" value={response()} />
+        </div>
+      ) : undefined}
+    </BasicTool>
   )
 }

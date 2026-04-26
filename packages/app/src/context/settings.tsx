@@ -12,10 +12,14 @@ export interface NotificationSettings {
 export interface SoundSettings {
   agentEnabled: boolean
   agent: string
+  agentVolume: number
   permissionsEnabled: boolean
   permissions: string
+  permissionsVolume: number
   errorsEnabled: boolean
   errors: string
+  errorsVolume: number
+  masterVolume: number
 }
 
 export interface Settings {
@@ -137,17 +141,26 @@ const defaultSettings: Settings = {
     errors: false,
   },
   sounds: {
-    agentEnabled: true,
+    agentEnabled: false,
     agent: "staplebops-01",
-    permissionsEnabled: true,
+    agentVolume: 1,
+    permissionsEnabled: false,
     permissions: "staplebops-02",
-    errorsEnabled: true,
+    permissionsVolume: 1,
+    errorsEnabled: false,
     errors: "nope-03",
+    errorsVolume: 1,
+    masterVolume: 1,
   },
 }
 
 function withFallback<T>(read: () => T | undefined, fallback: T) {
   return createMemo(() => read() ?? fallback)
+}
+
+function clampVolume(value: number) {
+  if (!Number.isFinite(value)) return 1
+  return Math.min(1, Math.max(0, value))
 }
 
 export const { use: useSettings, provider: SettingsProvider } = createSimpleContext({
@@ -299,6 +312,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       sounds: {
+        masterVolume: withFallback(() => store.sounds?.masterVolume, defaultSettings.sounds.masterVolume),
+        setMasterVolume(value: number) {
+          setStore("sounds", "masterVolume", clampVolume(value))
+        },
         agentEnabled: withFallback(() => store.sounds?.agentEnabled, defaultSettings.sounds.agentEnabled),
         setAgentEnabled(value: boolean) {
           setStore("sounds", "agentEnabled", value)
@@ -306,6 +323,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         agent: withFallback(() => store.sounds?.agent, defaultSettings.sounds.agent),
         setAgent(value: string) {
           setStore("sounds", "agent", value)
+        },
+        agentVolume: withFallback(() => store.sounds?.agentVolume, defaultSettings.sounds.agentVolume),
+        setAgentVolume(value: number) {
+          setStore("sounds", "agentVolume", clampVolume(value))
         },
         permissionsEnabled: withFallback(
           () => store.sounds?.permissionsEnabled,
@@ -318,6 +339,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setPermissions(value: string) {
           setStore("sounds", "permissions", value)
         },
+        permissionsVolume: withFallback(
+          () => store.sounds?.permissionsVolume,
+          defaultSettings.sounds.permissionsVolume,
+        ),
+        setPermissionsVolume(value: number) {
+          setStore("sounds", "permissionsVolume", clampVolume(value))
+        },
         errorsEnabled: withFallback(() => store.sounds?.errorsEnabled, defaultSettings.sounds.errorsEnabled),
         setErrorsEnabled(value: boolean) {
           setStore("sounds", "errorsEnabled", value)
@@ -325,6 +353,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+        errorsVolume: withFallback(() => store.sounds?.errorsVolume, defaultSettings.sounds.errorsVolume),
+        setErrorsVolume(value: number) {
+          setStore("sounds", "errorsVolume", clampVolume(value))
         },
       },
     }

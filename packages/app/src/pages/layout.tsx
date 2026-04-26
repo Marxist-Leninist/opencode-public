@@ -483,7 +483,10 @@ export default function Layout(props: ParentProps) {
 
         if (e.details.type === "permission.asked") {
           if (settings.sounds.permissionsEnabled()) {
-            void playSoundById(settings.sounds.permissions())
+            void playSoundById(
+              settings.sounds.permissions(),
+              settings.sounds.masterVolume() * settings.sounds.permissionsVolume(),
+            )
           }
           if (settings.notifications.permissions()) {
             void platform.notify(title, description, href)

@@ -75,6 +75,11 @@ function getLoads() {
 
 const cache = new Map<SoundID, Promise<string | undefined>>()
 
+function clampVolume(value: number) {
+  if (!Number.isFinite(value)) return 1
+  return Math.min(1, Math.max(0, value))
+}
+
 export function soundSrc(id: string | undefined) {
   const loads = getLoads()
   if (!id || !(id in loads)) return Promise.resolve(undefined)
@@ -86,10 +91,11 @@ export function soundSrc(id: string | undefined) {
   return next
 }
 
-export function playSound(src: string | undefined) {
+export function playSound(src: string | undefined, volume = 1) {
   if (typeof Audio === "undefined") return
   if (!src) return
   const audio = new Audio(src)
+  audio.volume = clampVolume(volume)
   audio.play().catch(() => undefined)
   return () => {
     audio.pause()
@@ -97,6 +103,6 @@ export function playSound(src: string | undefined) {
   }
 }
 
-export function playSoundById(id: string | undefined) {
-  return soundSrc(id).then((src) => playSound(src))
+export function playSoundById(id: string | undefined, volume = 1) {
+  return soundSrc(id).then((src) => playSound(src, volume))
 }

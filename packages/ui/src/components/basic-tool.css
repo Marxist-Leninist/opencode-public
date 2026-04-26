@@ -257,3 +257,45 @@
     }
   }
 }
+
+[data-component="generic-tool-details"] {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 16px 24px;
+}
+
+[data-component="generic-tool-block"] {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-slot="generic-tool-block-title"] {
+  font-family: var(--font-family-sans);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-large);
+  color: var(--text-weak);
+}
+
+[data-slot="generic-tool-block-pre"] {
+  width: 100%;
+  max-height: min(260px, 42vh);
+  min-width: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-weak-base);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-stronger) 82%, transparent);
+  color: var(--text-strong);
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  scrollbar-width: thin;
+}
