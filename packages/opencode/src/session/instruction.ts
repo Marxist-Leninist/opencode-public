@@ -49,6 +49,15 @@ function extract(messages: MessageV2.WithParts[]) {
   return paths
 }
 
+export function formatPreferences(preferences: Config.Info["preferences"]) {
+  const body = (typeof preferences === "string" ? [preferences] : (preferences ?? []))
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join("\n\n")
+  if (!body) return []
+  return [`User preferences:\n${body}`]
+}
+
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
   readonly systemPaths: () => Effect.Effect<Set<string>, AppFileSystem.Error>
@@ -173,6 +182,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
         return [
           ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
           ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
+          ...formatPreferences(config.preferences),
         ]
       })
 

@@ -1128,6 +1128,46 @@ test("deduplicates duplicate instructions from global and local configs", async 
   })
 })
 
+test("merges preferences from global and local configs", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const projectDir = path.join(dir, "project")
+      const opencodeDir = path.join(projectDir, ".opencode")
+      await fs.mkdir(opencodeDir, { recursive: true })
+
+      await Filesystem.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          preferences: ["Prefer Bun over npm.", "Keep responses concise."],
+        }),
+      )
+
+      await Filesystem.write(
+        path.join(opencodeDir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          preferences: ["Keep responses concise.", "Use ASCII unless the file already uses Unicode."],
+        }),
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: path.join(tmp.path, "project"),
+    fn: async () => {
+      const config = await load()
+      const preferences = Array.isArray(config.preferences) ? config.preferences : [config.preferences]
+
+      expect(preferences).toContain("Prefer Bun over npm.")
+      expect(preferences).toContain("Keep responses concise.")
+      expect(preferences).toContain("Use ASCII unless the file already uses Unicode.")
+      expect(preferences.filter((item) => item === "Keep responses concise.").length).toBe(1)
+      expect(preferences.length).toBe(3)
+    },
+  })
+})
+
 test("deduplicates duplicate plugins from global and local configs", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

@@ -674,6 +674,28 @@ Place plugin files in `.opencode/plugins/` or `~/.config/opencode/plugins/`. You
 
 ---
 
+### Preferences
+
+You can pin stable user preferences directly into the model context with the
+`preferences` option. Use this for personal style, workflow, and tool choices
+that should apply across sessions without creating a separate instruction file.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "preferences": [
+    "Prefer Bun over npm for package scripts.",
+    "Keep responses concise.",
+    "Use ASCII unless the file already uses Unicode."
+  ]
+}
+```
+
+`preferences` can be a single string or an array of strings. When multiple
+config files define preferences, OpenCode merges and deduplicates them.
+
+---
+
 ### Instructions
 
 You can configure the instructions for the model you're using through the `instructions` option.

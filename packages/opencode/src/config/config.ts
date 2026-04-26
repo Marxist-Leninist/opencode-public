@@ -52,7 +52,17 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
   if (target.instructions && source.instructions) {
     merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
   }
+  if (target.preferences && source.preferences) {
+    merged.preferences = Array.from(
+      new Set([...normalizePreferences(target.preferences), ...normalizePreferences(source.preferences)]),
+    )
+  }
   return merged
+}
+
+function normalizePreferences(preferences: Info["preferences"]) {
+  if (!preferences) return []
+  return typeof preferences === "string" ? [preferences] : preferences
 }
 
 function normalizeLoadedConfig(data: unknown, source: string) {
@@ -191,6 +201,12 @@ export const Info = Schema.Struct({
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
   }),
+  preferences: Schema.optional(Schema.Union([Schema.String, Schema.mutable(Schema.Array(Schema.String))])).annotate(
+    {
+      description:
+        "Inline user preferences to pin into the model system context. Use for stable personal style, workflow, and tool preferences.",
+    },
+  ),
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermission.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),

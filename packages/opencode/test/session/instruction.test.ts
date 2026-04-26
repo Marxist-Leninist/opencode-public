@@ -220,6 +220,50 @@ describe("Instruction.resolve", () => {
 })
 
 describe("Instruction.system", () => {
+  test("includes inline preferences from config", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        preferences: ["Prefer Bun over npm for package scripts.", "Keep responses concise."],
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: () =>
+        run(
+          Instruction.Service.use((svc) =>
+            Effect.gen(function* () {
+              const rules = yield* svc.system()
+              expect(rules).toContain(
+                "User preferences:\nPrefer Bun over npm for package scripts.\n\nKeep responses concise.",
+              )
+            }),
+          ),
+        ),
+    })
+  })
+
+  test("includes string preferences from config", async () => {
+    await using tmp = await tmpdir({
+      config: {
+        preferences: "Use ASCII unless the file already uses Unicode.",
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: () =>
+        run(
+          Instruction.Service.use((svc) =>
+            Effect.gen(function* () {
+              const rules = yield* svc.system()
+              expect(rules).toContain("User preferences:\nUse ASCII unless the file already uses Unicode.")
+            }),
+          ),
+        ),
+    })
+  })
+
   test("loads both project and global AGENTS.md when both exist", async () => {
     const originalConfigDir = process.env["OPENCODE_CONFIG_DIR"]
     delete process.env["OPENCODE_CONFIG_DIR"]
