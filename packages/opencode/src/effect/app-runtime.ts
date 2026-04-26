@@ -82,7 +82,7 @@ export const AppLayer = Layer.mergeAll(
   Instruction.defaultLayer,
   LLM.defaultLayer,
   LSP.defaultLayer,
-  MCP.defaultLayer,
+  MCP.defaultLayerWithProvider,
   McpAuth.defaultLayer,
   Command.defaultLayer,
   Truncate.defaultLayer,
