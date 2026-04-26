@@ -277,6 +277,9 @@ export const Info = Schema.Struct({
           model: Schema.optional(ConfigModelID).annotate({
             description: "Model to use for deferred MCP search augmentation, in provider/model format.",
           }),
+          limit: Schema.optional(PositiveInt).annotate({
+            description: "Default number of deferred MCP tool matches to activate per search.",
+          }),
         }),
       ),
     }),

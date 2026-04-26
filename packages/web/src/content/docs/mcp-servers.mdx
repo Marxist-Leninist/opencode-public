@@ -17,7 +17,7 @@ Large MCP servers can expose dozens or hundreds of tools. Set `defer` to `true` 
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "silicon_goddess": {
+    "large_remote": {
       "type": "remote",
       "url": "https://mcp.example.com/mcp",
       "defer": true,
@@ -54,13 +54,14 @@ You can also make every MCP server deferred by default:
     "defer_mcp_tools": true,
     "defer_mcp_tools_search": {
       "mode": "smart",
-      "model": "deepseek/deepseek-v4-pro",
+      "model": "deepseek/deepseek-v4-flash",
+      "limit": 5,
     },
   },
 }
 ```
 
-Set `"defer": false` on a specific server to opt it out of the global default. The configured `model` is only used when the search mode is `augment`; `smart` remains the default so discovery does not spend model tokens unless requested.
+Set `"defer": false` on a specific server to opt it out of the global default. The configured `model` is only used when the search mode is `augment`; `smart` remains the default so discovery does not spend model tokens unless requested. The configured `limit` controls how many matching tool schemas are activated by each search.
 
 ---
 

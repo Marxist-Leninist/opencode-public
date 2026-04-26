@@ -224,9 +224,12 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
-function readLimit(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_DEFERRED_SEARCH_LIMIT
-  return Math.max(1, Math.min(Math.floor(value), MAX_DEFERRED_SEARCH_LIMIT))
+function readLimit(value: unknown, cfg: Config.Info) {
+  const configured = cfg.experimental?.defer_mcp_tools_search?.limit
+  const fallback =
+    typeof configured === "number" && Number.isFinite(configured) ? configured : DEFAULT_DEFERRED_SEARCH_LIMIT
+  const raw = typeof value === "number" && Number.isFinite(value) ? value : fallback
+  return Math.max(1, Math.min(Math.floor(raw), MAX_DEFERRED_SEARCH_LIMIT))
 }
 
 /**
@@ -237,7 +240,7 @@ function readLimit(value: unknown) {
  * - `+token` - token MUST appear in name/server/description (filter)
  * - `keyword keyword` - keyword search, ranked
  *
- * Forms can mix: `+memory tags`, `select:sg2_memory_tags,sg2_microwave_calc`, etc.
+ * Forms can mix: `+memory tags`, `select:server_memory_tags,server_microwave_calc`, etc.
  */
 export function parseDeferredSearchQuery(raw: string | undefined): {
   select: string[]
@@ -1131,7 +1134,7 @@ export const layer = Layer.effect(
               server: { type: "string", description: "Restrict to a single MCP server." },
               limit: {
                 type: "number",
-                description: `Max matches to load (default ${DEFAULT_DEFERRED_SEARCH_LIMIT}, cap ${MAX_DEFERRED_SEARCH_LIMIT}).`,
+                description: `Max matches to load (default from config or ${DEFAULT_DEFERRED_SEARCH_LIMIT}, cap ${MAX_DEFERRED_SEARCH_LIMIT}).`,
               },
               mode: {
                 type: "string",
@@ -1155,7 +1158,7 @@ export const layer = Layer.effect(
             const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
             const rawQuery = readString(input.query)
             const parsed = parseDeferredSearchQuery(rawQuery)
-            const limit = readLimit(input.limit)
+            const limit = readLimit(input.limit, cfg)
             const dryRun = input.dry_run === true
             const serverFilter = readString(input.server)
 
