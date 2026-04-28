@@ -17,9 +17,14 @@ type Store = {
 }
 
 const RECENT_LIMIT = 5
+export const DEFAULT_VISIBLE_MODELS = new Set(["openrouter:openrouter/free", "openrouter:openrouter/auto"])
 
 function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`
+}
+
+export function isDefaultVisibleModel(model: ModelKey) {
+  return DEFAULT_VISIBLE_MODELS.has(modelKey(model))
 }
 
 export const { use: useModels, provider: ModelsProvider } = createSimpleContext({
@@ -36,14 +41,17 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       }),
     )
 
-    const available = createMemo(() =>
-      providers.connected().flatMap((p) =>
-        Object.values(p.models).map((m) => ({
-          ...m,
-          provider: p,
-        })),
-      ),
-    )
+    const available = createMemo(() => {
+      const connected = new Set(providers.connected().map((p) => p.id))
+      return providers.all().flatMap((p) =>
+        Object.values(p.models)
+          .filter((m) => connected.has(p.id) || isDefaultVisibleModel({ providerID: p.id, modelID: m.id }))
+          .map((m) => ({
+            ...m,
+            provider: p,
+          })),
+      )
+    })
 
     const release = createMemo(
       () =>
@@ -116,6 +124,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       const state = visibility().get(key)
       if (state === "hide") return false
       if (state === "show") return true
+      if (isDefaultVisibleModel(model)) return true
+      if (model.providerID === "openrouter") return false
       if (latestSet().has(key)) return true
       const date = release().get(key)
       if (!date?.isValid) return true

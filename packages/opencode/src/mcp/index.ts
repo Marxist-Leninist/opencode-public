@@ -188,6 +188,34 @@ function mcpToolKey(clientName: string, toolName: string) {
   return sanitize(clientName) + "_" + sanitize(toolName)
 }
 
+function equivalentServerGroup(server: string) {
+  const normalized = sanitize(server).toLowerCase()
+  if (normalized === "sg" || normalized === "sg1" || normalized === "sg2") return "sg"
+  if (normalized === "silicon_goddess" || normalized === "silicongoddess") return "sg"
+  return `server:${normalized}`
+}
+
+function serverPreference(server: string) {
+  const normalized = sanitize(server).toLowerCase()
+  if (normalized === "sg2") return 0
+  if (normalized === "sg1") return 1
+  return 2
+}
+
+function equivalentToolKey(server: string, toolName: string) {
+  return equivalentServerGroup(server) + ":" + sanitize(toolName).toLowerCase()
+}
+
+function requestedToolParts(tool: string | undefined) {
+  if (!tool) return undefined
+  const idx = tool.indexOf("_")
+  if (idx < 0) return undefined
+  return {
+    server: tool.slice(0, idx).toLowerCase(),
+    name: tool.slice(idx + 1).toLowerCase(),
+  }
+}
+
 function isMcpDeferred(entry: ConfigMCP.Info | undefined, cfg: Config.Info) {
   return entry?.defer ?? cfg.experimental?.defer_mcp_tools ?? false
 }
@@ -391,8 +419,21 @@ export function searchDeferredToolDefinitions(input: {
     }
   }
 
+  const seen = new Set<string>()
   return matches
-    .sort((a, b) => b.score - a.score || a.server.localeCompare(b.server) || a.name.localeCompare(b.name))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        serverPreference(a.server) - serverPreference(b.server) ||
+        a.server.localeCompare(b.server) ||
+        a.name.localeCompare(b.name),
+    )
+    .filter((match) => {
+      const key = equivalentToolKey(match.server, match.name)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     .slice(0, limit)
     .map(({ score: _score, ...match }) => match)
 }
@@ -407,6 +448,7 @@ function findDeferredTool(input: {
   const requestedServer = input.server?.toLowerCase()
   const requestedName = input.name?.toLowerCase()
   const requestedTool = input.tool?.toLowerCase()
+  const requestedToolPart = requestedToolParts(requestedTool)
 
   for (const server of input.servers) {
     if (
@@ -424,6 +466,19 @@ function findDeferredTool(input: {
       if (requestedName && name !== requestedName && sanitize(mcpTool.name).toLowerCase() !== requestedName) continue
       if (!requestedTool && !requestedName) continue
       return { server, tool: mcpTool, key }
+    }
+  }
+
+  if (!requestedToolPart) return
+  for (const server of input.servers) {
+    const sameServer =
+      server.toLowerCase() === requestedToolPart.server || sanitize(server).toLowerCase() === requestedToolPart.server
+    const sameEquivalentServer = equivalentServerGroup(server) === equivalentServerGroup(requestedToolPart.server)
+    if (!sameServer && !sameEquivalentServer) continue
+
+    for (const mcpTool of input.defs[server] ?? []) {
+      if (sanitize(mcpTool.name).toLowerCase() !== requestedToolPart.name) continue
+      return { server, tool: mcpTool, key: mcpToolKey(server, mcpTool.name) }
     }
   }
 }
@@ -1128,8 +1183,7 @@ export const layer = Layer.effect(
             properties: {
               query: {
                 type: "string",
-                description:
-                  "Search query. Supports `select:id1,id2`, `+required`, and free-text keywords. Required.",
+                description: "Search query. Supports `select:id1,id2`, `+required`, and free-text keywords. Required.",
               },
               server: { type: "string", description: "Restrict to a single MCP server." },
               limit: {
@@ -1139,8 +1193,7 @@ export const layer = Layer.effect(
               mode: {
                 type: "string",
                 enum: ["standard", "smart", "augment"],
-                description:
-                  "standard=strict token match, smart=local expansion (default), augment=LLM rerank.",
+                description: "standard=strict token match, smart=local expansion (default), augment=LLM rerank.",
               },
               model: {
                 type: "string",

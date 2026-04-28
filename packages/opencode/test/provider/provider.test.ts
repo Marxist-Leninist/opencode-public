@@ -1867,6 +1867,29 @@ test("custom model inherits api.url from models.dev provider", async () => {
   })
 })
 
+test("openrouter router models are always available", () => {
+  const provider = Provider.fromModelsDevProvider({
+    id: "openrouter",
+    name: "OpenRouter",
+    env: ["OPENROUTER_API_KEY"],
+    npm: "@openrouter/ai-sdk-provider",
+    api: "https://openrouter.ai/api/v1",
+    models: {},
+  })
+
+  const free = provider.models["openrouter/free"]
+  expect(free).toBeDefined()
+  expect(free.name).toBe("Free Models Router")
+  expect(free.api.id).toBe("openrouter/free")
+  expect(free.api.url).toBe("https://openrouter.ai/api/v1")
+
+  const auto = provider.models["openrouter/auto"]
+  expect(auto).toBeDefined()
+  expect(auto.name).toBe("Auto Router")
+  expect(auto.api.id).toBe("openrouter/auto")
+  expect(auto.api.url).toBe("https://openrouter.ai/api/v1")
+})
+
 test("mode cost preserves over-200k pricing from base model", () => {
   const provider = {
     id: "openai",

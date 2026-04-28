@@ -231,6 +231,22 @@ test("searchDeferredToolDefinitions reports loaded flag from selected sets", () 
   expect(matches[0].loaded).toBe(true)
 })
 
+test("searchDeferredToolDefinitions dedupes SG1 and SG2 mirror tools", () => {
+  const defs = {
+    sg1: [{ name: "memory_search", description: "Search memory", inputSchema: { type: "object" } }],
+    sg2: [{ name: "memory_search", description: "Search memory", inputSchema: { type: "object" } }],
+  }
+  const matches = MCP.searchDeferredToolDefinitions({
+    defs: defs as any,
+    selected: {},
+    servers: ["sg1", "sg2"],
+    query: "memory",
+    limit: 5,
+  })
+  expect(matches).toHaveLength(1)
+  expect(matches[0].tool).toBe("sg2_memory_search")
+})
+
 test("searchDeferredToolDefinitions enforces +required tokens", () => {
   const defs = {
     big: [
@@ -328,6 +344,80 @@ test(
 )
 
 test(
+  "mcp_search treats SG1 and SG2 as mirror endpoints",
+  withInstance(
+    {
+      sg1: {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+      sg2: {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "sg1"
+        getOrCreateClientState("sg1").tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg1", { type: "local", command: ["echo", "test"], defer: true })
+
+        lastCreatedClientName = "sg2"
+        getOrCreateClientState("sg2").tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg2", { type: "local", command: ["echo", "test"], defer: true })
+
+        const toolsBefore = yield* mcp.tools()
+        const search = (toolsBefore as any).mcp_search
+        const result = yield* Effect.tryPromise(() => execTool(search, { query: "memory", limit: 5 }))
+        const parsed = parseJsonResult(result)
+        expect(parsed.loaded).toEqual(["sg2_memory_search"])
+        expect(parsed.matches).toHaveLength(1)
+
+        const toolsAfter = yield* mcp.tools()
+        expect((toolsAfter as any).sg2_memory_search).toBeDefined()
+        expect((toolsAfter as any).sg1_memory_search).toBeUndefined()
+      }),
+  ),
+)
+
+test(
+  "mcp_search select falls back across SG mirror endpoints",
+  withInstance(
+    {
+      sg1: {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "sg1"
+        getOrCreateClientState("sg1").tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg1", { type: "local", command: ["echo", "test"], defer: true })
+
+        const toolsBefore = yield* mcp.tools()
+        const search = (toolsBefore as any).mcp_search
+        const result = yield* Effect.tryPromise(() => execTool(search, { query: "select:sg2_memory_search" }))
+        const parsed = parseJsonResult(result)
+        expect(parsed.loaded).toEqual(["sg1_memory_search"])
+        expect(parsed.missing).toBeUndefined()
+
+        const toolsAfter = yield* mcp.tools()
+        expect((toolsAfter as any).sg1_memory_search).toBeDefined()
+      }),
+  ),
+)
+
+test(
   "experimental.defer_mcp_tools defers servers that don't override defer",
   withInstance(
     {
@@ -403,9 +493,7 @@ test(
 
         const tools = yield* mcp.tools()
         const search = (tools as any).mcp_search
-        const result = yield* Effect.tryPromise(() =>
-          execTool(search, { query: "select:svc_does_not_exist" }),
-        )
+        const result = yield* Effect.tryPromise(() => execTool(search, { query: "select:svc_does_not_exist" }))
         const parsed = parseJsonResult(result)
         expect(parsed.loaded).toEqual([])
         expect(parsed.missing).toEqual(["svc_does_not_exist"])
@@ -427,9 +515,7 @@ test(
       Effect.gen(function* () {
         lastCreatedClientName = "svc"
         const state = getOrCreateClientState("svc")
-        state.tools = [
-          { name: "alpha", description: "alpha tool", inputSchema: { type: "object", properties: {} } },
-        ]
+        state.tools = [{ name: "alpha", description: "alpha tool", inputSchema: { type: "object", properties: {} } }]
 
         yield* mcp.add("svc", { type: "local", command: ["echo", "test"], defer: true })
 

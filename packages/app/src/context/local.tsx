@@ -3,7 +3,7 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useParams } from "@solidjs/router"
 import { batch, createEffect, createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
-import { useModels } from "@/context/models"
+import { isDefaultVisibleModel, useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
@@ -91,7 +91,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const validModel = (model: ModelKey) => {
       const provider = providers.all().find((item) => item.id === model.providerID)
-      return !!provider?.models[model.modelID] && connected().has(model.providerID)
+      return !!provider?.models[model.modelID] && (connected().has(model.providerID) || isDefaultVisibleModel(model))
     }
 
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {

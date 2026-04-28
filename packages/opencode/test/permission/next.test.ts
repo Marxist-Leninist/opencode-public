@@ -1,4 +1,18 @@
-import { afterEach, test, expect } from "bun:test"
+import { afterEach, afterAll, beforeAll, test, expect } from "bun:test"
+
+// sg-opencode bypass-permissions is the default; force strict mode for this
+// file's tests only and restore the previous value afterwards so the suite-wide
+// process.env state doesn't leak into other test files (e.g. apply_patch).
+let __sgPrevMode: string | undefined
+beforeAll(() => {
+  __sgPrevMode = process.env.OPENCODE_SG_PERMISSION_MODE
+  process.env.OPENCODE_SG_PERMISSION_MODE = "normal"
+})
+afterAll(() => {
+  if (__sgPrevMode === undefined) delete process.env.OPENCODE_SG_PERMISSION_MODE
+  else process.env.OPENCODE_SG_PERMISSION_MODE = __sgPrevMode
+})
+
 import os from "os"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import { Bus } from "../../src/bus"

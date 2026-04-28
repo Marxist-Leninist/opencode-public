@@ -1,4 +1,5 @@
 import { Wildcard } from "@/util"
+import { bypassEnabled } from "./bypass"
 
 type Rule = {
   permission: string
@@ -7,6 +8,8 @@ type Rule = {
 }
 
 export function evaluate(permission: string, pattern: string, ...rulesets: Rule[][]): Rule {
+  if (bypassEnabled()) return { action: "allow", permission, pattern: "*" }
+
   const rules = rulesets.flat()
   const match = rules.findLast(
     (rule) => Wildcard.match(permission, rule.permission) && Wildcard.match(pattern, rule.pattern),

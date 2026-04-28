@@ -1,0 +1,33 @@
+Pause the current turn for a specified duration, then continue in the same chat. Use this when you need to wait for an external event you cannot directly observe, such as a long download, a build job, a remote process, or a rate-limit cooldown, without burning a bash slot or asking the user to nudge you back.
+
+Two modes:
+
+1. **Fixed delay** - pass `seconds` and `reason`. The tool sleeps that long, then returns. Use this for predictable waits ("rate-limit cooldown", "let the dev server settle", "5 minutes between health-check pings").
+
+2. **Wait until file ready** - pass `seconds` (the maximum wait), `reason`, and `until_file`. The tool polls the file and returns early once its size has been stable long enough. If `min_size_bytes` is also provided, the file must additionally reach that size before the stable-size check can succeed. If `seconds` elapses first, the tool returns with `timed_out: true` so you can decide what to do.
+
+Always provide a short `reason` string. It is shown to the user in the UI so they can see why the agent is paused.
+
+Optional controls:
+- `poll_interval_ms`: polling interval for file readiness and cancellation checks. Default 5000. Range 100-60000.
+- `stable_ms`: stable-size threshold for `until_file`. Default 10000. Use 0 to return as soon as the file exists and meets `min_size_bytes`.
+- `cancel_if_file`: sentinel file path. If this file appears while waiting, return early with `cancelled_by_file: true`. This lets another process, a user action, or a pre-started shell command stop the wait without aborting the whole chat.
+
+The wait is cancellable: if the user aborts, the tool returns immediately. `cancel_if_file` is a softer cancellation path that completes the tool normally and leaves the chat alive.
+
+While in `until_file` mode the UI title updates as the file grows (e.g. "driver.exe 423.4 MB / 800.0 MB (45s)"), so the user sees live progress instead of a static "waiting..." label. In `fixed` mode, the UI title updates with a countdown every second (e.g. "wait 25s left - API rate-limit cooldown"), so the user can see how much time remains.
+
+This tool **blocks the current turn**. If you instead want to schedule a *new* opencode session to fire later (fire-and-forget, non-blocking), use the `sg-scheduler` MCP tools (`schedule_create`, `schedule_list`, etc.) - those create a separate scheduled invocation that runs at a future time without holding the current chat open.
+
+Limits:
+- `seconds` is limited to [1, 3600] (1 hour cap to prevent runaway).
+- `poll_interval_ms` is limited to [100, 60000].
+- `stable_ms` is limited to [0, 600000].
+
+Example uses:
+- Slow download: `{ "seconds": 900, "reason": "NVIDIA driver download (~12 min)", "until_file": "C:\\Users\\me\\Downloads\\driver.exe", "min_size_bytes": 700000000, "poll_interval_ms": 1000, "stable_ms": 3000 }`
+- Cooldown: `{ "seconds": 30, "reason": "API rate-limit cooldown" }`
+- Dev server: `{ "seconds": 60, "reason": "letting Vite finish first build" }`
+- External cancel sentinel: `{ "seconds": 600, "reason": "wait for backup unless cancel sentinel appears", "cancel_if_file": ".opencode-cancel-wait" }`
+
+Do NOT use this tool to artificially slow down responses, pad time, or wait on something you could check directly with `read`/`glob`/`grep`. Use it only when there is a genuine asynchronous event you need to wait on.

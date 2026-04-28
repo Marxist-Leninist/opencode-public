@@ -1,4 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+
+// sg-opencode bypass-permissions is the default; this test exercises the ACP
+// permission-request flow which needs the strict prompt-flow path. Scoped via
+// beforeAll/afterAll so the env mutation doesn't leak to other test files.
+let __sgPrevMode: string | undefined
+beforeAll(() => {
+  __sgPrevMode = process.env.OPENCODE_SG_PERMISSION_MODE
+  process.env.OPENCODE_SG_PERMISSION_MODE = "normal"
+})
+afterAll(() => {
+  if (__sgPrevMode === undefined) delete process.env.OPENCODE_SG_PERMISSION_MODE
+  else process.env.OPENCODE_SG_PERMISSION_MODE = __sgPrevMode
+})
+
 import { ACP } from "../../src/acp/agent"
 import type { AgentSideConnection } from "@agentclientprotocol/sdk"
 import type { Event, EventMessagePartUpdated, ToolStatePending, ToolStateRunning } from "@opencode-ai/sdk/v2"

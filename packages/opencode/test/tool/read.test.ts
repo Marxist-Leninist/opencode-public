@@ -1,5 +1,20 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, afterAll, beforeAll, describe, expect } from "bun:test"
 import { Cause, Effect, Exit, Layer } from "effect"
+
+// sg-opencode bypass-permissions is the default; the .env-gating tests below
+// assert that reading .env files triggers a permission ask, so this file needs
+// the strict prompt-flow path. Scoped via beforeAll/afterAll to avoid leaking
+// the env mutation into other test files.
+let __sgPrevMode: string | undefined
+beforeAll(() => {
+  __sgPrevMode = process.env.OPENCODE_SG_PERMISSION_MODE
+  process.env.OPENCODE_SG_PERMISSION_MODE = "normal"
+})
+afterAll(() => {
+  if (__sgPrevMode === undefined) delete process.env.OPENCODE_SG_PERMISSION_MODE
+  else process.env.OPENCODE_SG_PERMISSION_MODE = __sgPrevMode
+})
+
 import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"

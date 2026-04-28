@@ -975,7 +975,7 @@ export default function Page() {
     }
 
     if (event.key.length === 1 && event.key !== "Unidentified" && !(event.ctrlKey || event.metaKey)) {
-      if (composer.blocked() || isChildSession()) return
+      if (composer.blocked()) return
       inputRef?.focus()
     }
   }
@@ -1028,7 +1028,6 @@ export default function Page() {
   }
 
   const focusInput = () => {
-    if (isChildSession()) return
     inputRef?.focus()
   }
 
@@ -1554,7 +1553,7 @@ export default function Page() {
   const queueEnabled = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return settings.general.followup() === "queue" && busy(id) && !composer.blocked() && !isChildSession()
+    return settings.general.followup() === "queue" && busy(id) && !composer.blocked()
   })
 
   const followupText = (item: FollowupDraft) => {
@@ -1586,7 +1585,6 @@ export default function Page() {
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
 
   const sendFollowup = (sessionID: string, id: string, opts?: { manual?: boolean }) => {
-    if (sync.session.get(sessionID)?.parentID) return Promise.resolve()
     const item = (followup.items[sessionID] ?? []).find((entry) => entry.id === id)
     if (!item) return Promise.resolve()
     if (followupBusy(sessionID)) return Promise.resolve()
@@ -1717,7 +1715,6 @@ export default function Page() {
     if (followupBusy(sessionID)) return
     if (followup.failed[sessionID] === item.id) return
     if (followup.paused[sessionID]) return
-    if (isChildSession()) return
     if (composer.blocked()) return
     if (busy(sessionID)) return
 
@@ -1900,7 +1897,7 @@ export default function Page() {
             }}
             onResponseSubmit={resumeScroll}
             followup={
-              params.id && !isChildSession()
+              params.id
                 ? {
                     queue: queueEnabled,
                     items: followupDock(),

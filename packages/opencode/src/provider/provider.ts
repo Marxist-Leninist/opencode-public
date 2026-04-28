@@ -967,6 +967,33 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
   return result
 }
 
+const OPENROUTER_ROUTER_MODELS = {
+  "openrouter/free": {
+    id: "openrouter/free",
+    name: "Free Models Router",
+    attachment: true,
+    reasoning: true,
+    tool_call: true,
+    temperature: true,
+    release_date: "2026-02-01",
+    modalities: { input: ["text", "image"], output: ["text"] },
+    cost: { input: 0, output: 0 },
+    limit: { context: 200000, input: 200000, output: 8000 },
+  },
+  "openrouter/auto": {
+    id: "openrouter/auto",
+    name: "Auto Router",
+    attachment: true,
+    reasoning: true,
+    tool_call: true,
+    temperature: true,
+    release_date: "2026-03-15",
+    modalities: { input: ["text", "image", "audio", "video", "pdf"], output: ["text", "image"] },
+    cost: { input: 0, output: 0 },
+    limit: { context: 2000000, output: 32768 },
+  },
+} satisfies Record<string, ModelsDev.Model>
+
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
   const base: Model = {
     id: ModelID.make(model.id),
@@ -1020,7 +1047,14 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
 
 export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
   const models: Record<string, Model> = {}
-  for (const [key, model] of Object.entries(provider.models)) {
+  const providerModels: ModelsDev.Provider["models"] =
+    provider.id === ProviderID.openrouter
+      ? {
+          ...OPENROUTER_ROUTER_MODELS,
+          ...provider.models,
+        }
+      : provider.models
+  for (const [key, model] of Object.entries(providerModels)) {
     models[key] = fromModelsDevModel(provider, model)
     for (const [mode, opts] of Object.entries(model.experimental?.modes ?? {})) {
       const id = `${model.id}-${mode}`

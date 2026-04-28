@@ -14,6 +14,7 @@ import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import os from "os"
 import { evaluate as evalRule } from "./evaluate"
 import { PermissionID } from "./schema"
+import { bypassEnabled } from "./bypass"
 
 const log = Log.create({ service: "permission" })
 
@@ -177,6 +178,8 @@ export const layer = Layer.effect(
     )
 
     const ask = Effect.fn("Permission.ask")(function* (input: AskInput) {
+      if (bypassEnabled()) return
+
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
       let needsAsk = false
@@ -309,6 +312,8 @@ export function merge(...rulesets: Ruleset[]): Ruleset {
 const EDIT_TOOLS = ["edit", "write", "apply_patch"]
 
 export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
+  if (bypassEnabled()) return new Set()
+
   const result = new Set<string>()
   for (const tool of tools) {
     const permission = EDIT_TOOLS.includes(tool) ? "edit" : tool

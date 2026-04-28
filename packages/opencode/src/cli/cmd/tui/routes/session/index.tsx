@@ -46,6 +46,8 @@ import type { ApplyPatchTool } from "@/tool/apply_patch"
 import type { WebFetchTool } from "@/tool/webfetch"
 import type { CodeSearchTool } from "@/tool/codesearch"
 import type { WebSearchTool } from "@/tool/websearch"
+import type { WaitTool } from "@/tool/wait"
+import type { HashTool } from "@/tool/hash"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -135,14 +137,14 @@ export function Session() {
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const permissions = createMemo(() => {
-    if (session()?.parentID) return []
+    if (session()?.parentID) return sync.data.permission[route.sessionID] ?? []
     return children().flatMap((x) => sync.data.permission[x.id] ?? [])
   })
   const questions = createMemo(() => {
-    if (session()?.parentID) return []
+    if (session()?.parentID) return sync.data.question[route.sessionID] ?? []
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
-  const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
+  const visible = createMemo(() => permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
 
   const pending = createMemo(() => {
@@ -1571,6 +1573,12 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "websearch"}>
           <WebSearch {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "wait"}>
+          <Wait {...toolprops} />
+        </Match>
+        <Match when={props.part.tool === "hash"}>
+          <Hash {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -1962,6 +1970,38 @@ function WebSearch(props: ToolProps<typeof WebSearchTool>) {
   return (
     <InlineTool icon="◈" pending="Searching web..." complete={props.input.query} part={props.part}>
       Exa Web Search "{props.input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
+    </InlineTool>
+  )
+}
+
+function Wait(props: ToolProps<typeof WaitTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const seconds = createMemo(() => props.input.seconds ?? props.metadata.seconds)
+  const reason = createMemo(() => props.input.reason ?? props.metadata.reason)
+  const target = createMemo(() => props.input.until_file ?? props.metadata.target)
+  const label = createMemo(() => (typeof seconds() === "number" ? `${seconds()}s` : "delay"))
+
+  return (
+    <InlineTool icon="~" pending="Waiting..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      Wait {label()}
+      <Show when={reason()}> - {reason()}</Show>
+      <Show when={target()}> ({path.basename(String(target()))})</Show>
+    </InlineTool>
+  )
+}
+
+function Hash(props: ToolProps<typeof HashTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const algorithm = createMemo(() => props.input.algorithm ?? props.metadata.algorithm ?? "hash")
+  const filepath = createMemo(() => props.input.filePath)
+  const basename = createMemo(() => (filepath() ? path.basename(String(filepath())) : "file"))
+  const state = createMemo(() =>
+    props.metadata.matches === true ? "verified" : props.metadata.matches === false ? "mismatch" : "digest",
+  )
+
+  return (
+    <InlineTool icon="#" pending="Hashing..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      {algorithm()} {state()} {basename()}
     </InlineTool>
   )
 }
