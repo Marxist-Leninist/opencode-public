@@ -7,6 +7,10 @@ interface MockClientState {
   notificationHandlers: Map<unknown, (...args: any[]) => any>
   closed: boolean
   callToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>
+  // If set, the next callTool invocation throws this error instead of returning a result.
+  failNext?: Error
+  // If true, every callTool throws.
+  alwaysFail?: boolean
 }
 
 const clientStates = new Map<string, MockClientState>()
@@ -102,6 +106,14 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
 
     async callTool(req: { name: string; arguments?: Record<string, unknown> }) {
       this._state?.callToolCalls.push(req)
+      if (this._state?.alwaysFail) {
+        throw new Error(`mock client always fails`)
+      }
+      if (this._state?.failNext) {
+        const err = this._state.failNext
+        this._state.failNext = undefined
+        throw err
+      }
       return { content: [{ type: "text", text: `called ${req.name}` }] }
     }
 
@@ -497,6 +509,85 @@ test(
         const parsed = parseJsonResult(result)
         expect(parsed.loaded).toEqual([])
         expect(parsed.missing).toEqual(["svc_does_not_exist"])
+      }),
+  ),
+)
+
+test(
+  "SG mirror tool falls over to sibling endpoint on call failure",
+  withInstance(
+    {
+      sg1: { type: "local", command: ["echo", "test"], defer: true },
+      sg2: { type: "local", command: ["echo", "test"], defer: true },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "sg1"
+        const sg1State = getOrCreateClientState("sg1")
+        sg1State.tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg1", { type: "local", command: ["echo", "test"], defer: true })
+
+        lastCreatedClientName = "sg2"
+        const sg2State = getOrCreateClientState("sg2")
+        sg2State.tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg2", { type: "local", command: ["echo", "test"], defer: true })
+
+        const initial = yield* mcp.tools()
+        const search = (initial as any).mcp_search
+        yield* Effect.tryPromise(() => execTool(search, { query: "memory", limit: 5 }))
+
+        const tools = yield* mcp.tools()
+        const sgTool = (tools as any).sg2_memory_search
+        expect(sgTool).toBeDefined()
+
+        // Force sg2 (the preferred mirror) to fail; sg1 should pick up the call.
+        sg2State.failNext = new Error("sg2 transient outage")
+        const result = yield* Effect.tryPromise(() => execTool(sgTool, { query: "test" }))
+        expect(result?.content?.[0]?.text).toBe("called memory_search")
+        expect(sg1State.callToolCalls.at(-1)?.name).toBe("memory_search")
+        expect(sg2State.callToolCalls.at(-1)?.name).toBe("memory_search")
+      }),
+  ),
+)
+
+test(
+  "SG mirror tool propagates the error when every sibling fails",
+  withInstance(
+    {
+      sg1: { type: "local", command: ["echo", "test"], defer: true },
+      sg2: { type: "local", command: ["echo", "test"], defer: true },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "sg1"
+        const sg1State = getOrCreateClientState("sg1")
+        sg1State.tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg1", { type: "local", command: ["echo", "test"], defer: true })
+
+        lastCreatedClientName = "sg2"
+        const sg2State = getOrCreateClientState("sg2")
+        sg2State.tools = [
+          { name: "memory_search", description: "Search memory", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("sg2", { type: "local", command: ["echo", "test"], defer: true })
+
+        const initial = yield* mcp.tools()
+        const search = (initial as any).mcp_search
+        yield* Effect.tryPromise(() => execTool(search, { query: "memory", limit: 5 }))
+
+        const tools = yield* mcp.tools()
+        const sgTool = (tools as any).sg2_memory_search
+        sg1State.alwaysFail = true
+        sg2State.alwaysFail = true
+
+        const exit = yield* Effect.tryPromise(() => execTool(sgTool, { query: "test" })).pipe(Effect.exit)
+        expect(exit._tag).toBe("Failure")
       }),
   ),
 )

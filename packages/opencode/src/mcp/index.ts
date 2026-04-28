@@ -510,7 +510,12 @@ function parseAugmentedSearchTools(text: string) {
 }
 
 // Convert MCP tool definition to AI SDK Tool type
-function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
+function convertMcpTool(
+  mcpTool: MCPToolDef,
+  client: MCPClient,
+  timeout?: number,
+  fallbacks: ReadonlyArray<{ server: string; client: MCPClient }> = [],
+): Tool {
   const inputSchema = mcpTool.inputSchema
 
   // Spread first, then override type to ensure it's always "object"
@@ -521,21 +526,44 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
     additionalProperties: false,
   }
 
+  const callOnce = (c: MCPClient, args: unknown) =>
+    c.callTool(
+      {
+        name: mcpTool.name,
+        arguments: (args || {}) as Record<string, unknown>,
+      },
+      CallToolResultSchema,
+      {
+        resetTimeoutOnProgress: true,
+        timeout,
+      },
+    )
+
   return dynamicTool({
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown) => {
-      return client.callTool(
-        {
-          name: mcpTool.name,
-          arguments: (args || {}) as Record<string, unknown>,
-        },
-        CallToolResultSchema,
-        {
-          resetTimeoutOnProgress: true,
-          timeout,
-        },
-      )
+      try {
+        return await callOnce(client, args)
+      } catch (err) {
+        if (fallbacks.length === 0) throw err
+        log.warn("primary mcp tool call failed; attempting failover", {
+          tool: mcpTool.name,
+          error: err instanceof Error ? err.message : String(err),
+          fallbacks: fallbacks.map((f) => f.server),
+        })
+        let lastErr: unknown = err
+        for (const fb of fallbacks) {
+          try {
+            const result = await callOnce(fb.client, args)
+            log.info("mcp tool call succeeded via failover", { tool: mcpTool.name, via: fb.server })
+            return result
+          } catch (fbErr) {
+            lastErr = fbErr
+          }
+        }
+        throw lastErr
+      }
     },
   })
 }
@@ -1133,6 +1161,32 @@ export const layer = Layer.effect(
         ([clientName]) => s.status[clientName]?.status === "connected",
       )
 
+      // Build a "mirror group" map so that, for unified MCP servers exposed via
+      // multiple access points (e.g. sg1/sg2), a tool call against the primary
+      // can transparently fall over to a sibling if the primary errors.
+      const mirrorGroup = new Map<string, Array<{ server: string; client: MCPClient; toolNames: Set<string> }>>()
+      for (const [clientName, client] of connectedClients) {
+        const group = equivalentServerGroup(clientName)
+        if (group.startsWith("server:")) continue // singleton group, no mirroring
+        const listed = s.defs[clientName] ?? []
+        const toolNames = new Set(listed.map((t) => t.name))
+        const arr = mirrorGroup.get(group) ?? []
+        arr.push({ server: clientName, client, toolNames })
+        mirrorGroup.set(group, arr)
+      }
+      for (const arr of mirrorGroup.values()) {
+        arr.sort((a, b) => serverPreference(a.server) - serverPreference(b.server))
+      }
+
+      const fallbacksFor = (clientName: string, toolName: string): Array<{ server: string; client: MCPClient }> => {
+        const group = equivalentServerGroup(clientName)
+        const peers = mirrorGroup.get(group)
+        if (!peers || peers.length <= 1) return []
+        return peers
+          .filter((p) => p.server !== clientName && p.toolNames.has(toolName))
+          .map(({ server, client }) => ({ server, client }))
+      }
+
       yield* Effect.forEach(
         connectedClients,
         ([clientName, client]) =>
@@ -1156,7 +1210,8 @@ export const layer = Layer.effect(
               ? listed.filter((mcpTool) => selected.has(mcpTool.name))
               : listed
             for (const mcpTool of available) {
-              result[mcpToolKey(clientName, mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              const fallbacks = fallbacksFor(clientName, mcpTool.name)
+              result[mcpToolKey(clientName, mcpTool.name)] = convertMcpTool(mcpTool, client, timeout, fallbacks)
             }
           }),
         { concurrency: "unbounded" },

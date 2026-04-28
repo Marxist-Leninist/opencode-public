@@ -25,6 +25,7 @@ import { TaskTool } from "../../tool/task"
 import { SkillTool } from "../../tool/skill"
 import { BashTool } from "../../tool/bash"
 import { TodoWriteTool } from "../../tool/todo"
+import type { AutomationTool } from "../../tool/automation"
 import { Locale } from "../../util"
 import { AppRuntime } from "@/effect/app-runtime"
 
@@ -202,6 +203,16 @@ function todo(info: ToolProps<typeof TodoWriteTool>) {
     },
     info.input.todos.map((item) => `${item.status === "completed" ? "[x]" : "[ ]"} ${item.content}`).join("\n"),
   )
+}
+
+function automation(info: ToolProps<typeof AutomationTool>) {
+  const action = info.input.action ?? "automation"
+  const id = info.metadata.id ?? info.input.id ?? info.input.title ?? ""
+  inline({
+    icon: "@",
+    title: `Automation ${action}${id ? ` ${id}` : ""}`,
+    description: info.metadata.enabled === false ? "disabled" : undefined,
+  })
 }
 
 function normalizePath(input?: string) {
@@ -420,6 +431,7 @@ export const RunCommand = cmd({
           if (part.tool === "task") return task(props<typeof TaskTool>(part))
           if (part.tool === "todowrite") return todo(props<typeof TodoWriteTool>(part))
           if (part.tool === "skill") return skill(props<typeof SkillTool>(part))
+          if (part.tool === "automation") return automation(props<typeof AutomationTool>(part))
           return fallback(part)
         } catch {
           return fallback(part)

@@ -11,6 +11,7 @@ const MIN_POLL_INTERVAL_MS = 100
 const MAX_POLL_INTERVAL_MS = 60_000
 const DEFAULT_STABLE_REQUIRED_MS = 10_000
 const MAX_STABLE_REQUIRED_MS = 600_000
+const DEFAULT_URL_TIMEOUT_MS = 10_000
 
 export const Parameters = Schema.Struct({
   seconds: Schema.Number.check(Schema.isInt())
@@ -37,7 +38,7 @@ export const Parameters = Schema.Struct({
       .check(Schema.isGreaterThanOrEqualTo(MIN_POLL_INTERVAL_MS))
       .check(Schema.isLessThanOrEqualTo(MAX_POLL_INTERVAL_MS)),
   ).annotate({
-    description: `Optional polling interval in milliseconds for until_file and cancel_if_file checks. Range ${MIN_POLL_INTERVAL_MS}-${MAX_POLL_INTERVAL_MS}. Default ${DEFAULT_POLL_INTERVAL_MS}.`,
+    description: `Optional polling interval in milliseconds for until_file/until_url/until_pid_exit and cancel_if_file checks. Range ${MIN_POLL_INTERVAL_MS}-${MAX_POLL_INTERVAL_MS}. Default ${DEFAULT_POLL_INTERVAL_MS}.`,
   }),
   stable_ms: Schema.optional(
     Schema.Number.check(Schema.isInt())
@@ -50,12 +51,28 @@ export const Parameters = Schema.Struct({
     description:
       "Optional sentinel file path. If this file appears while waiting, return early with cancelled_by_file=true instead of waiting for the timeout. Relative paths resolve from the current project directory.",
   }),
+  until_url: Schema.optional(Schema.String).annotate({
+    description:
+      "Optional http(s) URL. If provided, poll the URL with HEAD (then GET as fallback) and return early once the response status matches until_url_status. Useful for waiting on a dev server or service to come up.",
+  }),
+  until_url_status: Schema.optional(
+    Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(100)).check(Schema.isLessThanOrEqualTo(599)),
+  ).annotate({
+    description:
+      "Optional HTTP status code to consider success for until_url. Defaults to 200. A 2xx-class match can be requested as 200, 204, etc. Pass a number such as 401 to wait until an auth-protected endpoint at least responds.",
+  }),
+  until_pid_exit: Schema.optional(Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(1))).annotate({
+    description:
+      "Optional process id. If provided, return early once the process is no longer running. Useful for waiting on a backgrounded shell command to finish.",
+  }),
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
+type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit"
+
 type Metadata = {
-  mode: "fixed" | "until_file"
+  mode: WaitMode
   seconds: number
   reason: string
   elapsed_seconds?: number
@@ -72,6 +89,11 @@ type Metadata = {
   reached_min_size?: boolean
   cancel_if_file?: string
   cancelled_by_file?: boolean
+  url?: string
+  url_status?: number
+  expected_status?: number
+  pid?: number
+  exited?: boolean
 }
 
 const abortable = <A, E, R>(
@@ -94,6 +116,40 @@ const abortable = <A, E, R>(
 const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
 const done = (result: Tool.ExecuteResult<Metadata>) => result
 const sleepMs = (ms: number) => Effect.sleep(Duration.millis(Math.max(0, ms)))
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err: any) {
+    // EPERM means it exists but we lack permission to signal it - still alive.
+    return err?.code === "EPERM"
+  }
+}
+
+async function probeUrl(url: string, signal: AbortSignal, timeoutMs: number) {
+  const ac = new AbortController()
+  const onAbort = () => ac.abort()
+  signal.addEventListener("abort", onAbort, { once: true })
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    let res: Response | undefined
+    try {
+      res = await fetch(url, { method: "HEAD", signal: ac.signal, redirect: "follow" })
+    } catch {
+      // HEAD often disallowed; fall through to GET.
+    }
+    if (!res || res.status === 405 || res.status === 501) {
+      res = await fetch(url, { method: "GET", signal: ac.signal, redirect: "follow" })
+    }
+    return { status: res.status as number | undefined, error: undefined as string | undefined }
+  } catch (err: any) {
+    return { status: undefined, error: err?.message ?? String(err) }
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener("abort", onAbort)
+  }
+}
 
 export const WaitTool = Tool.define(
   "wait",
@@ -123,6 +179,208 @@ export const WaitTool = Tool.define(
                   Effect.catch(() => Effect.succeed(false)),
                 )
               : Effect.succeed(false)
+
+          if (params.until_url) {
+            const expectedStatus = params.until_url_status ?? 200
+            yield* ctx.metadata({
+              title: `wait up to ${params.seconds}s for ${params.until_url}`,
+              metadata: {
+                mode: "until_url",
+                url: params.until_url,
+                expected_status: expectedStatus,
+                seconds: params.seconds,
+                reason: params.reason,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+              },
+            })
+
+            let aborted = false
+            let cancelledByFile = false
+            let pollCount = 0
+            let lastStatus: number | undefined
+            let lastError: string | undefined
+            let lastTitleUpdate = start
+            let ready = false
+
+            while (Date.now() < deadline) {
+              if (yield* checkCancel()) {
+                cancelledByFile = true
+                break
+              }
+              pollCount++
+
+              const probe = yield* Effect.promise(() =>
+                probeUrl(params.until_url!, ctx.abort, Math.min(DEFAULT_URL_TIMEOUT_MS, pollIntervalMs * 2)),
+              )
+              lastStatus = probe.status
+              lastError = probe.error
+
+              if (lastStatus !== undefined && lastStatus === expectedStatus) {
+                ready = true
+                break
+              }
+
+              const now = Date.now()
+              if (now - lastTitleUpdate >= 1000 && now < deadline) {
+                lastTitleUpdate = now
+                const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+                yield* ctx.metadata({
+                  title: `${params.until_url} ${lastStatus ?? "?"} (${left}s left)`,
+                  metadata: {
+                    mode: "until_url",
+                    url: params.until_url,
+                    expected_status: expectedStatus,
+                    url_status: lastStatus,
+                    seconds: params.seconds,
+                    reason: params.reason,
+                    elapsed_seconds: (now - start) / 1000,
+                    remaining_seconds: left,
+                    polls: pollCount,
+                    poll_interval_ms: pollIntervalMs,
+                    cancel_if_file: cancelTarget,
+                  },
+                })
+              }
+
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) break
+              const tick = yield* abortable(sleepMs(Math.min(pollIntervalMs, remaining)), ctx.abort)
+              if (tick === "__aborted__") {
+                aborted = true
+                break
+              }
+            }
+
+            const elapsed = (Date.now() - start) / 1000
+            const titleSuffix = ready
+              ? `${params.until_url} ${lastStatus} ready`
+              : cancelledByFile
+                ? `wait cancelled by file after ${elapsed.toFixed(1)}s`
+                : aborted
+                  ? `wait cancelled after ${elapsed.toFixed(1)}s`
+                  : `wait timed out after ${elapsed.toFixed(1)}s`
+            return done({
+              title: titleSuffix,
+              metadata: {
+                mode: "until_url",
+                url: params.until_url,
+                expected_status: expectedStatus,
+                url_status: lastStatus,
+                seconds: params.seconds,
+                elapsed_seconds: elapsed,
+                polls: pollCount,
+                reason: params.reason,
+                ready,
+                timed_out: !ready && !aborted && !cancelledByFile,
+                aborted,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+                cancelled_by_file: cancelledByFile,
+              },
+              output: ready
+                ? `URL ${params.until_url} returned ${lastStatus} after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                : cancelledByFile
+                  ? `Wait cancelled after ${elapsed.toFixed(1)}s because sentinel file exists: ${cancelTarget}. Last status: ${lastStatus ?? lastError ?? "no response"}. Reason: ${params.reason}`
+                  : aborted
+                    ? `Wait cancelled after ${elapsed.toFixed(1)}s. Last status: ${lastStatus ?? lastError ?? "no response"}. Reason: ${params.reason}`
+                    : `Timed out after ${elapsed.toFixed(1)}s polling ${params.until_url}. Last status: ${lastStatus ?? lastError ?? "no response"} (expected ${expectedStatus}). Reason: ${params.reason}`,
+            })
+          }
+
+          if (params.until_pid_exit !== undefined) {
+            const pid = params.until_pid_exit
+            yield* ctx.metadata({
+              title: `wait up to ${params.seconds}s for pid ${pid} to exit`,
+              metadata: {
+                mode: "until_pid_exit",
+                pid,
+                seconds: params.seconds,
+                reason: params.reason,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+              },
+            })
+
+            let aborted = false
+            let cancelledByFile = false
+            let pollCount = 0
+            let exited = false
+            let lastTitleUpdate = start
+
+            while (Date.now() < deadline) {
+              if (yield* checkCancel()) {
+                cancelledByFile = true
+                break
+              }
+              pollCount++
+
+              if (!isProcessAlive(pid)) {
+                exited = true
+                break
+              }
+
+              const now = Date.now()
+              if (now - lastTitleUpdate >= 1000 && now < deadline) {
+                lastTitleUpdate = now
+                const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+                yield* ctx.metadata({
+                  title: `pid ${pid} alive (${left}s left)`,
+                  metadata: {
+                    mode: "until_pid_exit",
+                    pid,
+                    seconds: params.seconds,
+                    reason: params.reason,
+                    elapsed_seconds: (now - start) / 1000,
+                    remaining_seconds: left,
+                    polls: pollCount,
+                    poll_interval_ms: pollIntervalMs,
+                    cancel_if_file: cancelTarget,
+                  },
+                })
+              }
+
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) break
+              const tick = yield* abortable(sleepMs(Math.min(pollIntervalMs, remaining)), ctx.abort)
+              if (tick === "__aborted__") {
+                aborted = true
+                break
+              }
+            }
+
+            const elapsed = (Date.now() - start) / 1000
+            return done({
+              title: exited
+                ? `pid ${pid} exited after ${elapsed.toFixed(1)}s`
+                : cancelledByFile
+                  ? `wait cancelled by file after ${elapsed.toFixed(1)}s`
+                  : aborted
+                    ? `wait cancelled after ${elapsed.toFixed(1)}s`
+                    : `pid ${pid} still alive after ${elapsed.toFixed(1)}s (timeout)`,
+              metadata: {
+                mode: "until_pid_exit",
+                pid,
+                seconds: params.seconds,
+                elapsed_seconds: elapsed,
+                polls: pollCount,
+                reason: params.reason,
+                exited,
+                timed_out: !exited && !aborted && !cancelledByFile,
+                aborted,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+                cancelled_by_file: cancelledByFile,
+              },
+              output: exited
+                ? `Process ${pid} exited after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                : cancelledByFile
+                  ? `Wait cancelled after ${elapsed.toFixed(1)}s because sentinel file exists: ${cancelTarget}. Reason: ${params.reason}`
+                  : aborted
+                    ? `Wait cancelled after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                    : `Timed out after ${elapsed.toFixed(1)}s waiting for pid ${pid} to exit. Reason: ${params.reason}`,
+            })
+          }
 
           if (!params.until_file) {
             yield* ctx.metadata({

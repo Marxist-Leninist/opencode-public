@@ -138,4 +138,89 @@ describe("tool.wait", () => {
       }),
     ),
   )
+
+  it.live("returns early when until_url succeeds", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const server = Bun.serve({ port: 0, fetch: () => new Response("ok", { status: 200 }) })
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            await server.stop(true)
+          }),
+        )
+        const url = `http://127.0.0.1:${server.port}/`
+
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 3,
+            reason: "service health",
+            until_url: url,
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_url")
+        expect(result.metadata.ready).toBe(true)
+        expect(result.metadata.url_status).toBe(200)
+        expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(2)
+      }),
+    ),
+  )
+
+  it.live("times out when until_url never returns the expected status", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const server = Bun.serve({ port: 0, fetch: () => new Response("nope", { status: 503 }) })
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            await server.stop(true)
+          }),
+        )
+        const url = `http://127.0.0.1:${server.port}/`
+
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 1,
+            reason: "expect 200",
+            until_url: url,
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_url")
+        expect(result.metadata.ready).toBeFalsy()
+        expect(result.metadata.timed_out).toBe(true)
+        expect(result.metadata.url_status).toBe(503)
+      }),
+    ),
+  )
+
+  it.live("returns early when until_pid_exit process is gone", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        // Pick a pid extremely unlikely to be alive on a test runner.
+        const result = yield* tool.execute(
+          {
+            seconds: 2,
+            reason: "absent pid",
+            until_pid_exit: 2_147_483_640,
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_pid_exit")
+        expect(result.metadata.exited).toBe(true)
+        expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(1)
+      }),
+    ),
+  )
 })

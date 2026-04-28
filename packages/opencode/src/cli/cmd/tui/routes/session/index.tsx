@@ -49,6 +49,7 @@ import type { WebSearchTool } from "@/tool/websearch"
 import type { WaitTool } from "@/tool/wait"
 import type { HashTool } from "@/tool/hash"
 import type { NotifyTool } from "@/tool/notify"
+import type { AutomationTool } from "@/tool/automation"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -1583,6 +1584,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "notify"}>
           <Notify {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "automation"}>
+          <Automation {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -1983,6 +1987,8 @@ function Wait(props: ToolProps<typeof WaitTool>) {
   const seconds = createMemo(() => props.input.seconds ?? props.metadata.seconds)
   const reason = createMemo(() => props.input.reason ?? props.metadata.reason)
   const target = createMemo(() => props.input.until_file ?? props.metadata.target)
+  const url = createMemo(() => props.input.until_url ?? props.metadata.url)
+  const pid = createMemo(() => props.input.until_pid_exit ?? props.metadata.pid)
   const label = createMemo(() => (typeof seconds() === "number" ? `${seconds()}s` : "delay"))
 
   return (
@@ -1990,6 +1996,8 @@ function Wait(props: ToolProps<typeof WaitTool>) {
       Wait {label()}
       <Show when={reason()}> - {reason()}</Show>
       <Show when={target()}> ({path.basename(String(target()))})</Show>
+      <Show when={url()}> [{String(url())}]</Show>
+      <Show when={pid()}> [pid {String(pid())}]</Show>
     </InlineTool>
   )
 }
@@ -2021,6 +2029,21 @@ function Notify(props: ToolProps<typeof NotifyTool>) {
       <Show when={delivered() === false} fallback={<>Notify [{urgency()}] {title()}</>}>
         Notify [{urgency()}] {title()} (not delivered)
       </Show>
+    </InlineTool>
+  )
+}
+
+function Automation(props: ToolProps<typeof AutomationTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const action = createMemo(() => props.input.action ?? props.metadata.action ?? "automation")
+  const id = createMemo(() => props.metadata.id ?? props.input.id ?? props.input.title ?? "")
+  const enabled = createMemo(() => props.metadata.enabled)
+
+  return (
+    <InlineTool icon="@" pending="Scheduling..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      Automation {action()}
+      <Show when={id()}> {String(id())}</Show>
+      <Show when={enabled() === false}> (disabled)</Show>
     </InlineTool>
   )
 }

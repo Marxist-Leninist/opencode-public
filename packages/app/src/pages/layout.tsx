@@ -2214,7 +2214,7 @@ export default function Layout(props: ParentProps) {
                   when={workspacesEnabled()}
                   fallback={
                     <>
-                      <div class="shrink-0 py-4">
+                      <div class="shrink-0 py-4 flex flex-col gap-2">
                         <Button
                           size="large"
                           icon="new-session"
@@ -2226,6 +2226,19 @@ export default function Layout(props: ParentProps) {
                           }}
                         >
                           {language.t("command.session.new")}
+                        </Button>
+                        <Button
+                          size="large"
+                          icon="task"
+                          variant={location.pathname.endsWith("/automations") ? "secondary" : "ghost"}
+                          class="w-full"
+                          onClick={() => {
+                            const dir = worktree()
+                            if (!dir) return
+                            navigateWithSidebarReset(`/${base64Encode(dir)}/automations`)
+                          }}
+                        >
+                          Automations
                         </Button>
                       </div>
                       <div class="flex-1 min-h-0">
@@ -2240,7 +2253,7 @@ export default function Layout(props: ParentProps) {
                   }
                 >
                   <>
-                    <div class="shrink-0 py-4">
+                    <div class="shrink-0 py-4 flex flex-col gap-2">
                       <Button
                         size="large"
                         icon="plus-small"
@@ -2252,6 +2265,19 @@ export default function Layout(props: ParentProps) {
                         }}
                       >
                         {language.t("workspace.new")}
+                      </Button>
+                      <Button
+                        size="large"
+                        icon="task"
+                        variant={location.pathname.endsWith("/automations") ? "secondary" : "ghost"}
+                        class="w-full"
+                        onClick={() => {
+                          const dir = worktree()
+                          if (!dir) return
+                          navigateWithSidebarReset(`/${base64Encode(dir)}/automations`)
+                        }}
+                      >
+                        Automations
                       </Button>
                     </div>
                     <div class="relative flex-1 min-h-0">

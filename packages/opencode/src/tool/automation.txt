@@ -1,0 +1,49 @@
+Create and manage SG OpenCode automations/routines from inside chat.
+
+Use this tool when the user asks to set up, create, schedule, enable, disable, list, inspect, delete, or run an automation/routine. Do not tell the user to open Task Scheduler or edit files manually when this tool can do it.
+
+What it does:
+- Stores each automation definition locally in OpenCode's data directory.
+- Writes the automation prompt to a separate prompt file.
+- Writes a runner `.cmd` file that launches `opencode-sg.cmd run` unattended with `OPENCODE_SG_PERMISSION_MODE=allow` and captures stdout/stderr to a per-run log file.
+- Records each scheduled run in a JSONL history file with timestamp and exit code.
+- On Windows, optionally installs/enables/disables/deletes the matching Scheduled Task.
+
+Actions:
+- `create`: create a new automation/routine. Requires `title`, `prompt`, and `schedule`.
+- `update`: modify an existing automation. Requires `id`; pass only fields that should change.
+- `list`: list all saved automations.
+- `show`: show one automation. Requires `id`.
+- `delete`: delete definition files, log directory, history file, and remove the scheduled task. Requires `id`.
+- `enable`: enable/install the scheduled task. Requires `id`.
+- `disable`: disable the scheduled task but keep the definition. Requires `id`.
+- `run_now`: start the scheduled task immediately (output goes to the log directory). Requires `id`.
+- `history`: list recent runs (timestamp + exit code + log path). Requires `id`. Use `history_limit` to bound output.
+- `logs`: print a tail of a run log. Requires `id`. Defaults to the latest run; pass `log_run` to pick a specific timestamp prefix. Use `tail_lines` to bound output.
+
+Schedules:
+- `every_minutes`: run every N minutes. Requires `interval_minutes`.
+- `hourly`: run every N hours. `interval_minutes` is interpreted as hours here; defaults to 1.
+- `daily`: run every day at `time` in HH:mm 24-hour format.
+- `weekly`: run on selected `days_of_week` at `time`. `days_of_week` is a list of MON/TUE/WED/THU/FRI/SAT/SUN; defaults to all 7 days.
+
+Important behavior:
+- `enabled` defaults to true on create.
+- `install` defaults to true on create/update/enable. Set `install=false` to save the routine definition without touching OS scheduling.
+- `working_directory` defaults to the current project directory.
+- `model` and `agent` are optional; omit them to use SG OpenCode defaults.
+- The scheduled run starts a new SG OpenCode session, not the current live chat turn.
+- Keep prompts specific and self-contained. Scheduled runs should know what to do without asking questions.
+- The runner exposes `OPENCODE_SG_AUTOMATION_RUN=1` and `OPENCODE_SG_AUTOMATION_ID=<id>` env vars so the agent can detect unattended mode.
+- Logs and history are kept on a rolling basis (latest 50 runs / 200 history entries) so disk usage stays bounded.
+
+Examples:
+- Hourly maintenance: `{ "action": "create", "title": "Improve SG OpenCode", "prompt": "Improve SG modded OpenCode. Run tests and rebuild if needed.", "schedule": "hourly", "interval_minutes": 1, "working_directory": "C:\\Users\\User\\Documents\\Codex\\2026-04-25\\skip-to-content-openrouter-personal-deepseek\\opencode" }`
+- Every 12 minutes: `{ "action": "create", "title": "Check download", "prompt": "Check whether the download finished and continue the install.", "schedule": "every_minutes", "interval_minutes": 12 }`
+- Daily: `{ "action": "create", "title": "Daily repo check", "prompt": "Inspect the repo status, fix obvious failures, and summarize.", "schedule": "daily", "time": "09:00" }`
+- Weekly weekdays: `{ "action": "create", "title": "Weekday standup notes", "prompt": "Generate a standup summary.", "schedule": "weekly", "time": "08:30", "days_of_week": ["MON","TUE","WED","THU","FRI"] }`
+- List: `{ "action": "list" }`
+- History: `{ "action": "history", "id": "improve-sg-opencode", "history_limit": 10 }`
+- Latest log tail: `{ "action": "logs", "id": "improve-sg-opencode" }`
+- Specific run log: `{ "action": "logs", "id": "improve-sg-opencode", "log_run": "20260429-080000" }`
+- Disable: `{ "action": "disable", "id": "daily-repo-check" }`

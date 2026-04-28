@@ -177,6 +177,114 @@ export type ParsedAPICallError =
       metadata?: Record<string, string>
     }
 
+function isSgRingProvider(providerID: ProviderID) {
+  const id = String(providerID).toLowerCase()
+  return id === "sg-ring" || id === "ring" || id.startsWith("sg-ring/")
+}
+
+type SgRingRewrite = { message: string; isRetryable: boolean }
+
+function rewriteSgRingMessage(
+  originalMessage: string,
+  body: any,
+  status?: number,
+): SgRingRewrite | undefined {
+  const errType =
+    typeof body?.error?.type === "string" ? body.error.type : typeof body?.type === "string" ? body.type : undefined
+  const errCode =
+    typeof body?.error?.code === "string" ? body.error.code : typeof body?.code === "string" ? body.code : undefined
+  const inner = typeof body?.error?.message === "string" ? body.error.message : undefined
+  const haystack = `${originalMessage} ${inner ?? ""}`.toLowerCase()
+
+  const looksLikeExpiry =
+    errType === "ling_session_expired" ||
+    errCode === "session_expired" ||
+    haystack.includes("alipay verification") ||
+    haystack.includes("ling studio") ||
+    haystack.includes("html/alipay") ||
+    haystack.includes("did_token")
+  if (looksLikeExpiry) {
+    return {
+      message: [
+        "Ring 2.5 1T proxy session expired.",
+        "The upstream Ling Studio (Alipay-protected) requires fresh cookies + DID_TOKEN.",
+        "Refresh by signing in at https://lingstudio.tbox.cn in a real browser, then update COOKIES + DID_TOKEN in /root/ling_proxy.py on the SG host and restart the proxy.",
+        inner ? `(proxy detail: ${inner})` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      isRetryable: false,
+    }
+  }
+
+  // Network-level reachability problems: doxx.lat or the SG host itself is down.
+  const looksUnreachable =
+    /econn(refused|reset|aborted)/i.test(haystack) ||
+    /etimedout|esockettimedout/i.test(haystack) ||
+    /enotfound|eai_again/i.test(haystack) ||
+    /fetch failed/i.test(haystack) ||
+    /socket hang up/i.test(haystack) ||
+    /network error/i.test(haystack)
+  if (looksUnreachable) {
+    return {
+      message: [
+        "Ring 2.5 1T proxy is unreachable from this host.",
+        "Either doxx.lat is offline or the SG host's ling_proxy.py is not running.",
+        "Check: `curl -sS https://doxx.lat/ring/v1/models` from this host, then `ssh goddess-mcp` and `systemctl status ling-proxy` (or `ps -ef | grep ling_proxy`).",
+        inner ? `(proxy detail: ${inner})` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      isRetryable: false,
+    }
+  }
+
+  // Bad gateway / upstream gateway errors from nginx in front of the proxy.
+  if (status === 502 || status === 503 || status === 504) {
+    return {
+      message: [
+        `Ring 2.5 1T proxy returned ${status} (nginx upstream gateway error).`,
+        "The proxy on goddess-mcp likely crashed, is restarting, or the upstream Ling Studio session is broken.",
+        "Try: `ssh goddess-mcp 'systemctl restart ling-proxy'` or restart the proxy script. If it persists, refresh COOKIES + DID_TOKEN in /root/ling_proxy.py.",
+        inner ? `(proxy detail: ${inner})` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      isRetryable: true,
+    }
+  }
+
+  // Rate limiting at the proxy or upstream Ring.
+  if (status === 429 || errCode === "rate_limit_exceeded" || haystack.includes("rate limit")) {
+    return {
+      message: [
+        "Ring 2.5 1T proxy is rate-limited.",
+        "Back off for a few seconds and retry, or reduce concurrency. The upstream Ling Studio API has aggressive rate limits.",
+        inner ? `(proxy detail: ${inner})` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      isRetryable: true,
+    }
+  }
+
+  // Auth-key issues (proxy itself uses a bearer; this is *not* the Alipay session).
+  if (status === 401 || status === 403) {
+    return {
+      message: [
+        `Ring 2.5 1T proxy rejected the bearer token (${status}).`,
+        "Check {file:sg_ring_key} in your OpenCode config matches the proxy's PROXY_KEY env var on goddess-mcp.",
+        inner ? `(proxy detail: ${inner})` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      isRetryable: false,
+    }
+  }
+
+  return undefined
+}
+
 export function parseAPICallError(input: { providerID: ProviderID; error: APICallError }): ParsedAPICallError {
   const m = message(input.providerID, input.error)
   const body = json(input.error.responseBody)
@@ -189,6 +297,22 @@ export function parseAPICallError(input: { providerID: ProviderID; error: APICal
   }
 
   const metadata = input.error.url ? { url: input.error.url } : undefined
+
+  if (isSgRingProvider(input.providerID)) {
+    const rewritten = rewriteSgRingMessage(m, body, input.error.statusCode)
+    if (rewritten) {
+      return {
+        type: "api_error",
+        message: rewritten.message,
+        statusCode: input.error.statusCode,
+        isRetryable: rewritten.isRetryable,
+        responseHeaders: input.error.responseHeaders,
+        responseBody: input.error.responseBody,
+        metadata,
+      }
+    }
+  }
+
   return {
     type: "api_error",
     message: m,
