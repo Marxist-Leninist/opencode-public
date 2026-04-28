@@ -1,0 +1,24 @@
+Send an OS-level desktop notification (Windows toast / Linux notify-send / macOS osascript).
+
+Use this when something the user wants to know about has happened — a long-running task finished, a build broke, a download stabilized, a remote agent posted a result. Especially useful in autonomous / scheduled runs where the user is not watching the chat live.
+
+Parameters:
+- `title` (required): short headline shown in the notification (1-80 chars). Concrete is better — "Build passed" beats "Done".
+- `message` (required): one or two sentences with the actual content. Up to ~400 chars.
+- `urgency` (optional): one of `low`, `normal` (default), `critical`. On Linux this maps to notify-send -u. On Windows it controls toast scenario (alarm/reminder for critical). On macOS it is informational only.
+- `quiet` (optional): if true, suppress the notification sound where the OS supports it. Default false.
+
+Behavior:
+- Best-effort: if no notification backend is available the tool still returns successfully with `metadata.delivered=false`. Do not retry on a non-delivered result; just continue.
+- Returns quickly (under ~2 seconds in the typical case). Notifications are fire-and-forget; the tool does not wait for the user to dismiss.
+- Notification text is displayed verbatim — do NOT include credentials, tokens, or anything sensitive.
+
+Examples:
+- Long task done: `{ "title": "SG OpenCode build complete", "message": "Both CLI and GUI rebuilt. Tests: 23 pass." }`
+- Critical failure: `{ "title": "Pre-commit failed", "message": "tsgo reported 4 type errors in packages/opencode/src/session.", "urgency": "critical" }`
+- Quiet status update: `{ "title": "Hourly run", "message": "Nothing to do this cycle.", "quiet": true }`
+
+Do NOT use this tool to:
+- Send messages to other people (Slack, email, SMS) — those are separate tools.
+- Replace returning results in chat. The user reads the chat too; the toast is supplementary.
+- Spam the user. One notification per genuinely-important milestone, not per step.

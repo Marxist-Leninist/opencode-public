@@ -15,6 +15,7 @@ import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
+import { parseTextToolCall } from "./text-tool-call"
 import type { Provider } from "@/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
@@ -213,7 +214,90 @@ export const layer: Layer.Layer<
         return true
       })
 
-      const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
+      const executeTextToolCall = Effect.fn("SessionProcessor.executeTextToolCall")(function* (
+        text: MessageV2.TextPart,
+        streamInput: LLM.StreamInput,
+      ) {
+        if (ctx.model.providerID !== "sg-ring") return false
+        const parsed = (() => {
+          try {
+            return parseTextToolCall(text.text)
+          } catch {
+            return undefined
+          }
+        })()
+        if (!parsed) return false
+
+        const toolName = streamInput.tools[parsed.tool] ? parsed.tool : parsed.tool.toLowerCase()
+        const item = streamInput.tools[toolName]
+        if (!item?.execute) return false
+
+        yield* session.removePart({
+          sessionID: text.sessionID,
+          messageID: text.messageID,
+          partID: text.id,
+        })
+        if (ctx.currentText?.id === text.id) ctx.currentText = undefined
+
+        const toolCallID = PartID.ascending()
+        const part = yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.assistantMessage.sessionID,
+          type: "tool",
+          tool: toolName,
+          callID: toolCallID,
+          state: {
+            status: "running",
+            input: parsed.input,
+            time: { start: Date.now() },
+          },
+          metadata: { sgTextToolCall: true },
+        } satisfies MessageV2.ToolPart)
+
+        ctx.toolcalls[toolCallID] = {
+          done: yield* Deferred.make<void>(),
+          partID: part.id,
+          messageID: part.messageID,
+          sessionID: part.sessionID,
+        }
+        ctx.assistantMessage.finish = "tool-calls"
+        yield* session.updateMessage(ctx.assistantMessage)
+
+        const abort = new AbortController()
+        const result = yield* Effect.promise(() =>
+          item.execute!(parsed.input, {
+            toolCallId: toolCallID,
+            messages: streamInput.messages,
+            abortSignal: abort.signal,
+          }),
+        ).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              yield* failToolCall(toolCallID, error)
+              return undefined
+            }),
+          ),
+        )
+        if (!result) return true
+
+        const output = (() => {
+          if (typeof result === "string") return { title: "", metadata: {}, output: result }
+          if (!isRecord(result)) return { title: "", metadata: {}, output: JSON.stringify(result) }
+          return {
+            title: typeof result.title === "string" ? result.title : "",
+            metadata: isRecord(result.metadata) ? result.metadata : {},
+            output: typeof result.output === "string" ? result.output : JSON.stringify(result),
+            attachments: Array.isArray(result.attachments)
+              ? (result.attachments as MessageV2.FilePart[])
+              : undefined,
+          }
+        })()
+        yield* completeToolCall(toolCallID, output)
+        return true
+      })
+
+      const handleEvent = Effect.fnUntraced(function* (value: StreamEvent, streamInput: LLM.StreamInput) {
         switch (value.type) {
           case "start":
             yield* status.set(ctx.sessionID, { type: "busy" })
@@ -447,6 +531,7 @@ export const layer: Layer.Layer<
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
+            if (yield* executeTextToolCall(ctx.currentText, streamInput)) return
             yield* session.updatePart(ctx.currentText)
             ctx.currentText = undefined
             return
@@ -548,7 +633,7 @@ export const layer: Layer.Layer<
             const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
-              Stream.tap((event) => handleEvent(event)),
+              Stream.tap((event) => handleEvent(event, streamInput)),
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
             )

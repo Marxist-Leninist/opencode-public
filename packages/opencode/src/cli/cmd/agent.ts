@@ -27,6 +27,7 @@ const AVAILABLE_TOOLS = [
   "todowrite",
   "wait",
   "hash",
+  "notify",
 ]
 
 const AgentCreateCommand = cmd({

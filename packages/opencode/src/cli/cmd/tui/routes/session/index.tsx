@@ -48,6 +48,7 @@ import type { CodeSearchTool } from "@/tool/codesearch"
 import type { WebSearchTool } from "@/tool/websearch"
 import type { WaitTool } from "@/tool/wait"
 import type { HashTool } from "@/tool/hash"
+import type { NotifyTool } from "@/tool/notify"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -1579,6 +1580,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "hash"}>
           <Hash {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "notify"}>
+          <Notify {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -2002,6 +2006,21 @@ function Hash(props: ToolProps<typeof HashTool>) {
   return (
     <InlineTool icon="#" pending="Hashing..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
       {algorithm()} {state()} {basename()}
+    </InlineTool>
+  )
+}
+
+function Notify(props: ToolProps<typeof NotifyTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const title = createMemo(() => props.input.title ?? "")
+  const urgency = createMemo(() => props.input.urgency ?? props.metadata.urgency ?? "normal")
+  const delivered = createMemo(() => props.metadata.delivered)
+
+  return (
+    <InlineTool icon="!" pending="Notifying..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      <Show when={delivered() === false} fallback={<>Notify [{urgency()}] {title()}</>}>
+        Notify [{urgency()}] {title()} (not delivered)
+      </Show>
     </InlineTool>
   )
 }

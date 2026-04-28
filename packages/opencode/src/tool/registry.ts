@@ -14,6 +14,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { WaitTool } from "./wait"
 import { HashTool } from "./hash"
+import { NotifyTool } from "./notify"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -119,6 +120,7 @@ export const layer: Layer.Layer<
     const skilltool = yield* SkillTool
     const waittool = yield* WaitTool
     const hashtool = yield* HashTool
+    const notifytool = yield* NotifyTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -210,6 +212,7 @@ export const layer: Layer.Layer<
           plan: Tool.init(plan),
           wait: Tool.init(waittool),
           hash: Tool.init(hashtool),
+          notify: Tool.init(notifytool),
         })
 
         return {
@@ -232,6 +235,7 @@ export const layer: Layer.Layer<
             tool.patch,
             tool.wait,
             tool.hash,
+            tool.notify,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
