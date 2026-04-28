@@ -18,6 +18,13 @@ describe("parseTextToolCall", () => {
     })
   })
 
+  test("parses Ring tool_call wrapper payloads", () => {
+    expect(parseTextToolCall('<tool_call>\n{"name":"Bash","arguments":{"command":"ls -la"}}\n</tool_call>')).toEqual({
+      tool: "Bash",
+      input: { command: "ls -la" },
+    })
+  })
+
   test("ignores normal answers", () => {
     expect(parseTextToolCall("I can run ls for you.")).toBeUndefined()
   })

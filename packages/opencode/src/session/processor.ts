@@ -218,7 +218,7 @@ export const layer: Layer.Layer<
         text: MessageV2.TextPart,
         streamInput: LLM.StreamInput,
       ) {
-        if (ctx.model.providerID !== "sg-ring") return false
+        if (ctx.model.providerID !== "sg-ring" && ctx.model.providerID !== "ring") return false
         const parsed = (() => {
           try {
             return parseTextToolCall(text.text)

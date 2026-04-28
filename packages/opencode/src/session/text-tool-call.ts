@@ -11,6 +11,12 @@ function unwrapFence(text: string) {
   return match ? match[1].trim() : trimmed
 }
 
+function unwrapToolCall(text: string) {
+  const trimmed = text.trim()
+  const match = trimmed.match(/^<\s*tool_call\s*>\s*([\s\S]*?)\s*<\s*\/\s*tool_call\s*>$/i)
+  return match ? match[1].trim() : trimmed
+}
+
 function parseInput(value: unknown) {
   if (isRecord(value)) return value
   if (typeof value !== "string") return
@@ -21,7 +27,7 @@ function parseInput(value: unknown) {
 }
 
 export function parseTextToolCall(text: string): TextToolCall | undefined {
-  const trimmed = unwrapFence(text)
+  const trimmed = unwrapToolCall(unwrapFence(text))
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return
 
   const parsed = JSON.parse(trimmed)
