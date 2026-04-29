@@ -50,6 +50,17 @@ export const Parameters = Schema.Struct({
   ).annotate({
     description: `Per-probe timeout in ms. Default ${DEFAULT_TIMEOUT_MS}.`,
   }),
+  cache_ttl_ms: Schema.optional(
+    Schema.Number.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(0))
+      .check(Schema.isLessThanOrEqualTo(3_600_000)),
+  ).annotate({
+    description:
+      "Optional cache TTL in ms (0-3,600,000) for the slow targets ring_text and ring_multimodal. When >0, recent successful probe results within the TTL are returned without a fresh roundtrip. The cache key includes the base URL + API key suffix. Default 0 (no caching).",
+  }),
+  force_refresh: Schema.optional(Schema.Boolean).annotate({
+    description: "When true, ignore any cached probe result and always make a fresh request. Default false.",
+  }),
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
@@ -60,6 +71,8 @@ type ProbeResult = {
   status?: number
   latency_ms?: number
   detail?: string
+  from_cache?: boolean
+  cache_age_ms?: number
 }
 
 type Metadata = {
@@ -72,6 +85,46 @@ type Metadata = {
   deepseek_base_url?: string
   openrouter_base_url?: string
   timeout_ms: number
+  cache_ttl_ms?: number
+  force_refresh?: boolean
+  cache_hits?: number
+}
+
+type CacheEntry = { result: ProbeResult; ts: number }
+const probeCache = new Map<string, CacheEntry>()
+const cacheKey = (target: Target, baseUrl: string, key: string | undefined) =>
+  `${target}|${baseUrl}|${key ? key.slice(-8) : "no-key"}`
+
+const sweepExpired = (ttlMs: number) => {
+  const now = Date.now()
+  for (const [k, v] of probeCache) {
+    if (now - v.ts > ttlMs) probeCache.delete(k)
+  }
+}
+
+async function probeWithCache<T extends Target>(
+  target: T,
+  baseUrl: string,
+  key: string | undefined,
+  ttlMs: number,
+  forceRefresh: boolean,
+  doProbe: () => Promise<ProbeResult>,
+): Promise<ProbeResult> {
+  if (ttlMs > 0 && !forceRefresh) {
+    const ck = cacheKey(target, baseUrl, key)
+    const hit = probeCache.get(ck)
+    if (hit) {
+      const age = Date.now() - hit.ts
+      if (age <= ttlMs && hit.result.ok) {
+        return { ...hit.result, from_cache: true, cache_age_ms: age }
+      }
+    }
+  }
+  const result = await doProbe()
+  if (ttlMs > 0 && result.ok) {
+    probeCache.set(cacheKey(target, baseUrl, key), { result, ts: Date.now() })
+  }
+  return result
 }
 
 const done = (result: Tool.ExecuteResult<Metadata>) => result
@@ -440,6 +493,9 @@ export const SgDoctorTool = Tool.define(
           const DEFAULT_TARGETS: Target[] = ["ring", "sg1", "sg2", "scheduler"]
           const targets: Target[] = (params.targets && params.targets.length > 0 ? params.targets : DEFAULT_TARGETS) as Target[]
           const timeoutMs = params.timeout_ms ?? DEFAULT_TIMEOUT_MS
+          const cacheTtlMs = params.cache_ttl_ms ?? 0
+          const forceRefresh = params.force_refresh ?? false
+          if (cacheTtlMs > 0) sweepExpired(cacheTtlMs)
 
           const ringBaseUrl =
             params.ring_base_url ??
@@ -484,33 +540,54 @@ export const SgDoctorTool = Tool.define(
             const include = new Set(targets)
             if (include.has("ring")) tasks.push(probeRing(ringBaseUrl, ringKey, timeoutMs))
             if (include.has("ring_text"))
-              tasks.push(probeRingText(ringBaseUrl, ringKey, timeoutMs))
+              tasks.push(
+                probeWithCache("ring_text", ringBaseUrl, ringKey, cacheTtlMs, forceRefresh, () =>
+                  probeRingText(ringBaseUrl, ringKey, timeoutMs),
+                ),
+              )
             if (include.has("ring_multimodal"))
-              tasks.push(probeRingMultimodal(ringBaseUrl, ringKey, timeoutMs))
+              tasks.push(
+                probeWithCache("ring_multimodal", ringBaseUrl, ringKey, cacheTtlMs, forceRefresh, () =>
+                  probeRingMultimodal(ringBaseUrl, ringKey, timeoutMs),
+                ),
+              )
             if (include.has("sg1")) tasks.push(probeMcp("sg1", sg1Url, timeoutMs))
             if (include.has("sg2")) tasks.push(probeMcp("sg2", sg2Url, timeoutMs))
             if (include.has("scheduler")) tasks.push(probeScheduler(cfg))
             if (include.has("deepseek"))
-              tasks.push(probeOpenAiCompatibleModels("deepseek", deepseekBaseUrl, deepseekKey, timeoutMs, "deepseek"))
+              tasks.push(
+                probeWithCache("deepseek", deepseekBaseUrl, deepseekKey, cacheTtlMs, forceRefresh, () =>
+                  probeOpenAiCompatibleModels("deepseek", deepseekBaseUrl, deepseekKey, timeoutMs, "deepseek"),
+                ),
+              )
             if (include.has("openrouter"))
-              tasks.push(probeOpenAiCompatibleModels("openrouter", openrouterBaseUrl, openrouterKey, timeoutMs))
+              tasks.push(
+                probeWithCache("openrouter", openrouterBaseUrl, openrouterKey, cacheTtlMs, forceRefresh, () =>
+                  probeOpenAiCompatibleModels("openrouter", openrouterBaseUrl, openrouterKey, timeoutMs),
+                ),
+              )
             return await Promise.all(tasks)
           })
 
           const map = {} as Record<Target, ProbeResult>
           for (const r of results) map[r.target] = r
           const ok = results.every((r) => r.ok)
+          const cacheHits = results.filter((r) => r.from_cache).length
 
           const lines = results.map((r) => {
             const status = r.ok ? "OK" : "FAIL"
             const latency = r.latency_ms !== undefined ? ` ${r.latency_ms}ms` : ""
             const code = r.status !== undefined ? ` ${r.status}` : ""
+            const cached = r.from_cache ? ` [cached ${Math.round((r.cache_age_ms ?? 0) / 1000)}s ago]` : ""
             const detail = r.detail ? ` - ${r.detail}` : ""
-            return `  ${r.target.padEnd(10)} ${status}${code}${latency}${detail}`
+            return `  ${r.target.padEnd(10)} ${status}${code}${latency}${cached}${detail}`
           })
 
+          const titleSuffix = cacheHits > 0 ? ` (${cacheHits} cached)` : ""
           return done({
-            title: ok ? `sg_doctor: all ${results.length} OK` : `sg_doctor: ${results.filter((r) => !r.ok).length}/${results.length} FAIL`,
+            title: ok
+              ? `sg_doctor: all ${results.length} OK${titleSuffix}`
+              : `sg_doctor: ${results.filter((r) => !r.ok).length}/${results.length} FAIL${titleSuffix}`,
             metadata: {
               ok,
               results: map,
@@ -521,8 +598,11 @@ export const SgDoctorTool = Tool.define(
               deepseek_base_url: deepseekBaseUrl,
               openrouter_base_url: openrouterBaseUrl,
               timeout_ms: timeoutMs,
+              cache_ttl_ms: cacheTtlMs,
+              force_refresh: forceRefresh,
+              cache_hits: cacheHits,
             },
-            output: [`SG health check (timeout=${timeoutMs}ms):`, ...lines, ok ? "All probed targets are healthy." : "One or more probes failed; see above."].join(
+            output: [`SG health check (timeout=${timeoutMs}ms${cacheTtlMs ? `, cache_ttl=${cacheTtlMs}ms` : ""}):`, ...lines, ok ? "All probed targets are healthy." : "One or more probes failed; see above."].join(
               "\n",
             ),
           })
@@ -538,4 +618,8 @@ export const __testing = {
   probeMcp,
   probeScheduler,
   probeOpenAiCompatibleModels,
+  probeWithCache,
+  probeCache,
+  cacheKey,
+  sweepExpired,
 }

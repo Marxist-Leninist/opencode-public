@@ -5,7 +5,18 @@ import path from "path"
 import { writeFile, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 
-const { probeRing, probeRingText, probeRingMultimodal, probeMcp, probeScheduler, probeOpenAiCompatibleModels } = __testing
+const {
+  probeRing,
+  probeRingText,
+  probeRingMultimodal,
+  probeMcp,
+  probeScheduler,
+  probeOpenAiCompatibleModels,
+  probeWithCache,
+  probeCache,
+  cacheKey,
+  sweepExpired,
+} = __testing
 
 describe("sg_doctor probes", () => {
   let server: Server
@@ -341,5 +352,90 @@ describe("sg_doctor probes", () => {
     const result = await probeOpenAiCompatibleModels("deepseek", `${baseUrl}/upstream-empty`, "goodkey", 4000)
     expect(result.ok).toBe(false)
     expect(result.detail).toMatch(/list empty/)
+  })
+
+  test("probeWithCache: ttl=0 always probes fresh", async () => {
+    probeCache.clear()
+    let calls = 0
+    const probe = async () => {
+      calls++
+      return { target: "ring_text" as const, ok: true, latency_ms: 5, detail: `call ${calls}` }
+    }
+    const a = await probeWithCache("ring_text", "https://example.test", "k1", 0, false, probe)
+    const b = await probeWithCache("ring_text", "https://example.test", "k1", 0, false, probe)
+    expect(calls).toBe(2)
+    expect(a.from_cache).toBeUndefined()
+    expect(b.from_cache).toBeUndefined()
+  })
+
+  test("probeWithCache: ttl>0 reuses a successful probe", async () => {
+    probeCache.clear()
+    let calls = 0
+    const probe = async () => {
+      calls++
+      return { target: "ring_multimodal" as const, ok: true, latency_ms: 9, detail: `c${calls}` }
+    }
+    const fresh = await probeWithCache("ring_multimodal", "https://example.test", "k1", 60_000, false, probe)
+    const cached = await probeWithCache("ring_multimodal", "https://example.test", "k1", 60_000, false, probe)
+    expect(calls).toBe(1)
+    expect(fresh.from_cache).toBeUndefined()
+    expect(cached.from_cache).toBe(true)
+    expect(typeof cached.cache_age_ms).toBe("number")
+  })
+
+  test("probeWithCache: failures are not cached", async () => {
+    probeCache.clear()
+    let calls = 0
+    const probe = async () => {
+      calls++
+      return { target: "ring_text" as const, ok: false, detail: `fail ${calls}` }
+    }
+    await probeWithCache("ring_text", "https://example.test", "k2", 60_000, false, probe)
+    await probeWithCache("ring_text", "https://example.test", "k2", 60_000, false, probe)
+    expect(calls).toBe(2)
+  })
+
+  test("probeWithCache: force_refresh ignores cache", async () => {
+    probeCache.clear()
+    let calls = 0
+    const probe = async () => {
+      calls++
+      return { target: "ring_multimodal" as const, ok: true, detail: `c${calls}` }
+    }
+    await probeWithCache("ring_multimodal", "https://example.test", "k3", 60_000, false, probe)
+    const refreshed = await probeWithCache("ring_multimodal", "https://example.test", "k3", 60_000, true, probe)
+    expect(calls).toBe(2)
+    expect(refreshed.from_cache).toBeUndefined()
+  })
+
+  test("probeWithCache: different keys cache separately", async () => {
+    probeCache.clear()
+    let calls = 0
+    const probe = async () => {
+      calls++
+      return { target: "ring_text" as const, ok: true, detail: `c${calls}` }
+    }
+    await probeWithCache("ring_text", "https://a.test", "x", 60_000, false, probe)
+    await probeWithCache("ring_text", "https://b.test", "x", 60_000, false, probe)
+    await probeWithCache("ring_text", "https://a.test", "y", 60_000, false, probe)
+    expect(calls).toBe(3)
+  })
+
+  test("sweepExpired: removes entries older than ttl", async () => {
+    probeCache.clear()
+    const k = cacheKey("ring_text", "https://expired.test", "key")
+    probeCache.set(k, {
+      result: { target: "ring_text", ok: true },
+      ts: Date.now() - 10_000,
+    })
+    sweepExpired(5_000)
+    expect(probeCache.has(k)).toBe(false)
+  })
+
+  test("cacheKey: only the suffix of the API key participates (no full-key leakage)", () => {
+    const long = "abcdefghijklmnopqrstuvwxyz123456"
+    const k = cacheKey("ring_text", "https://example.test", long)
+    expect(k).not.toContain(long)
+    expect(k.endsWith(long.slice(-8))).toBe(true)
   })
 })

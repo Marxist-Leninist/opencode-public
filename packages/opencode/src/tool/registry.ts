@@ -46,6 +46,8 @@ import { SqliteTool } from "./sqlite"
 import { MarkdownTool } from "./markdown"
 import { HtmlTool } from "./html"
 import { ImageTool } from "./image"
+import { EnvTool } from "./env"
+import { WhichTool } from "./which"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -183,6 +185,8 @@ export const layer: Layer.Layer<
     const markdowntool = yield* MarkdownTool
     const htmltool = yield* HtmlTool
     const imagetool = yield* ImageTool
+    const envtool = yield* EnvTool
+    const whichtool = yield* WhichTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -306,6 +310,8 @@ export const layer: Layer.Layer<
           markdown: Tool.init(markdowntool),
           html: Tool.init(htmltool),
           image: Tool.init(imagetool),
+          env: Tool.init(envtool),
+          which: Tool.init(whichtool),
         })
 
         return {
@@ -360,6 +366,8 @@ export const layer: Layer.Layer<
             tool.markdown,
             tool.html,
             tool.image,
+            tool.env,
+            tool.which,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

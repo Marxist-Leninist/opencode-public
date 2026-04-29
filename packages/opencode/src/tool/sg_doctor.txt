@@ -14,6 +14,8 @@ Parameters:
 - `deepseek_base_url` / `deepseek_api_key` (optional): override the DeepSeek probe target / token. Default base `https://api.deepseek.com`; key falls back to `provider.deepseek.options.apiKey`.
 - `openrouter_base_url` / `openrouter_api_key` (optional): override the OpenRouter probe target / token. Default base `https://openrouter.ai/api/v1`; key falls back to `provider.openrouter.options.apiKey`.
 - `timeout_ms` (optional): per-probe timeout in ms. Range 1000-60000. Default 8000.
+- `cache_ttl_ms` (optional): TTL in ms (0-3,600,000) for caching the slow probes (`ring_text`, `ring_multimodal`, `deepseek`, `openrouter`). When >0, a recent **successful** probe of the same target+base+key is reused instead of a fresh roundtrip — only successful probes are cached so transient failures never get pinned. Default 0 (no caching). Useful for an automated scheduler that re-checks every minute: pass e.g. `300000` to skip the 8-second multimodal roundtrip on every run.
+- `force_refresh` (optional): when true, ignore any cached probe result. Default false.
 
 Behavior:
 - Each target is probed independently and concurrently.
@@ -36,3 +38,5 @@ Examples:
 - Confirm Ring is still text-only: `{ "targets": ["ring_multimodal"] }`
 - Cross-check the SG1/SG2 mirrors with a tighter timeout: `{ "targets": ["sg1", "sg2"], "timeout_ms": 3000 }`
 - Verify upstream provider keys: `{ "targets": ["deepseek", "openrouter"] }`
+- Cached health pulse for a polling loop: `{ "targets": ["ring", "ring_multimodal"], "cache_ttl_ms": 300000 }` — first call probes both; subsequent calls within 5 minutes serve the multimodal probe from cache.
+- Force a fresh probe when investigating a regression: `{ "targets": ["ring_multimodal"], "cache_ttl_ms": 300000, "force_refresh": true }`

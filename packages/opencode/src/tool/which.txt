@@ -1,0 +1,31 @@
+Locate an executable on PATH — cross-platform replacement for `which` / `where` that does not need a shell.
+
+Why this exists:
+- On Windows the equivalent is `where`, which differs from POSIX `which`. PowerShell uses `Get-Command`. This tool is platform-agnostic and returns structured results.
+- It does not spawn a child process for the lookup itself, so it is safe to call dozens of times in a session.
+- It honours the standard executable suffix logic: on Windows it tries each `PATHEXT` extension (`.exe`, `.cmd`, `.bat`, `.com`, `.ps1`, etc.) in order; on POSIX it requires the executable bit.
+
+Modes:
+- `find` (default): return the first match for `name` and at most `limit` more entries (default 1, max 32). Returns absolute paths in the order they appear on PATH.
+- `all`: return every match for `name` along PATH (subject to `limit`, default 32, max 256). Useful for finding shadowed binaries.
+- `has`: boolean only — fastest path. Returns `found: true|false` without enumerating matches beyond the first hit.
+
+Parameters:
+- `name` (required): executable name. Must be a single segment — no path separators.
+  - On Windows you may include or omit the extension. If omitted, `PATHEXT` extensions are tried in order.
+  - On POSIX the extension is part of the name and is matched literally.
+- `path_override` (optional): an explicit colon/semicolon-separated PATH string to use instead of `process.env.PATH`. Useful for testing or for asking "what would `PATH=...` resolve this to?".
+- `extra_paths` (optional): array of additional directories to search **after** the resolved PATH. Each entry must be an absolute path. Use this for sandboxed lookups in known install dirs.
+- `limit` (optional): see mode descriptions.
+
+Output / metadata:
+- `found`: boolean.
+- `matches`: array of `{ path, exists, executable, ext_used? }` records.
+- `searched_path_count`: number of PATH directories actually scanned.
+- `pathext`: list of extensions tried (Windows only).
+
+Examples:
+- `{ "action": "find", "name": "git" }`
+- `{ "action": "all", "name": "node", "limit": 16 }`
+- `{ "action": "has", "name": "ffmpeg" }`
+- `{ "action": "find", "name": "opencode", "path_override": "C:/Users/User/.opencode/bin;C:/Windows" }`
