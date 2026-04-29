@@ -1,28 +1,34 @@
-List or kill OS processes by name pattern or PID.
+List, inspect, or kill OS processes by name pattern, PID, or TCP port.
 
-Use this when you need to check whether something is running (a build, a server, an editor) or terminate a hung process. Pairs well with the `wait` tool for "wait until X finishes" and `bash` for one-off shell work.
+Use this when you need to check whether something is running (a build, a server, an editor), find which process is holding a port, look up a single PID, or terminate a hung process. Pairs well with the `wait` tool for "wait until X finishes" and `bash` for one-off shell work.
 
 Parameters:
 - `action` (required): one of:
   - `list`: enumerate running processes matching `name_pattern` (or all if omitted).
   - `kill`: terminate the process identified by `pid`.
-- `name_pattern` (optional): case-insensitive substring match against the process image name (e.g. "node", "OpenCode", "chrome"). Required-ish for `list` to keep output small; if omitted you get a top slice.
-- `pid` (optional): process ID to kill. Required for `kill`.
+  - `by_port`: find which process is listening on TCP `port` (LISTENING state only).
+  - `info`: look up a single PID's name and resource usage.
+- `name_pattern` (optional): case-insensitive substring match against the process image name (e.g. "node", "OpenCode", "chrome"). Used by `list`.
+- `pid` (optional): process ID. Required for `kill` or `info`.
+- `port` (optional): TCP port (1-65535). Required for `by_port`.
 - `force` (optional, default false): when true and action is `kill`, send SIGKILL / use `taskkill /F`. When false, send SIGTERM / `taskkill` (request a graceful exit).
 - `limit` (optional, default 50): max number of rows to return for `list` (1-500).
 
 Behavior:
 - Cross-platform:
-  - Windows: `tasklist` for list (CSV), `taskkill` for kill.
-  - macOS / Linux: `ps -eo pid,comm,pcpu,rss` for list, `kill` (or `kill -9`) for kill.
+  - Windows: `tasklist` for list, `taskkill` for kill, `netstat -ano -p TCP` for by_port (augmented with tasklist names).
+  - macOS / Linux: `ps -eo pid,comm,pcpu,rss` for list, `kill` for kill. `by_port` prefers `lsof -nP -iTCP:PORT -sTCP:LISTEN`, falls back to `ss -ltnp` on Linux.
 - `list` returns metadata.processes as an array of { pid, name, cpu_percent?, rss_kb? }.
+- `by_port` returns metadata.listeners as an array of { pid, name?, proto, local_address, port }. Returns 0 listeners (still delivered=true) if nothing is bound.
+- `info` returns metadata.processes with the single matching row (or empty when the PID is gone).
 - `kill` returns metadata.killed (boolean), metadata.exit_code (number?), and metadata.error (string?) on failure. Does NOT throw on missing PID — reports it.
 - Best-effort: if the platform tooling isn't available, the tool sets `delivered=false` and explains. Do not retry on failure.
 - Refuses to kill PID 0/1 (system processes) — agent must use `bash` for that.
 
 Examples:
 - List all bun processes: `{ "action": "list", "name_pattern": "bun" }`
-- List anything OpenCode-ish: `{ "action": "list", "name_pattern": "OpenCode" }`
+- What's on port 3000? `{ "action": "by_port", "port": 3000 }`
+- What is PID 12345? `{ "action": "info", "pid": 12345 }`
 - Force-kill a hung PID: `{ "action": "kill", "pid": 12345, "force": true }`
 
 Do NOT use this tool to:

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { __testing } from "../../src/tool/process"
 
-const { parseCsvLine, parseTasklistCsvLine, parsePsLine, runProcess } = __testing
+const {
+  parseCsvLine,
+  parseTasklistCsvLine,
+  parsePsLine,
+  parseNetstatTcpLine,
+  parseLsofLine,
+  parseSsLine,
+  runProcess,
+} = __testing
 
 describe("process.parseCsvLine", () => {
   test("splits a plain comma-separated line", () => {
@@ -57,6 +65,70 @@ describe("process.parsePsLine", () => {
     expect(parsePsLine("   ")).toBeUndefined()
     expect(parsePsLine("not a pid bun 0.0 1024")).toBeUndefined()
     expect(parsePsLine("just three tokens here")).toBeUndefined()
+  })
+})
+
+describe("process.parseNetstatTcpLine", () => {
+  test("parses a Windows TCP LISTENING row", () => {
+    const row = parseNetstatTcpLine("  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1344")
+    expect(row).toBeDefined()
+    expect(row!.proto).toBe("TCP")
+    expect(row!.pid).toBe(1344)
+    expect(row!.port).toBe(135)
+    expect(row!.local_address).toBe("0.0.0.0")
+  })
+  test("parses an IPv6 listening row", () => {
+    const row = parseNetstatTcpLine("  TCP    [::]:445               [::]:0                 LISTENING       4")
+    expect(row).toBeDefined()
+    expect(row!.pid).toBe(4)
+    expect(row!.port).toBe(445)
+    expect(row!.local_address).toBe("[::]")
+  })
+  test("ignores ESTABLISHED and other non-LISTENING TCP rows", () => {
+    expect(
+      parseNetstatTcpLine("  TCP    10.0.0.1:49339         104.16.8.34:443        ESTABLISHED     17148"),
+    ).toBeUndefined()
+    expect(
+      parseNetstatTcpLine("  TCP    10.0.0.1:49347         52.123.129.14:443      CLOSE_WAIT      4052"),
+    ).toBeUndefined()
+  })
+  test("ignores headers and blank lines", () => {
+    expect(parseNetstatTcpLine("Active Connections")).toBeUndefined()
+    expect(parseNetstatTcpLine("  Proto  Local Address          Foreign Address        State           PID")).toBeUndefined()
+    expect(parseNetstatTcpLine("")).toBeUndefined()
+  })
+})
+
+describe("process.parseLsofLine", () => {
+  test("parses a typical lsof TCP LISTEN line", () => {
+    const row = parseLsofLine("node     12345 user   23u  IPv4 0xabcdef      0t0  TCP *:3000 (LISTEN)")
+    expect(row).toBeDefined()
+    expect(row!.pid).toBe(12345)
+    expect(row!.name).toBe("node")
+    expect(row!.proto).toBe("TCP")
+    expect(row!.port).toBe(3000)
+    expect(row!.local_address).toBe("*")
+  })
+  test("ignores the header line", () => {
+    expect(parseLsofLine("COMMAND     PID  USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME")).toBeUndefined()
+  })
+})
+
+describe("process.parseSsLine", () => {
+  test("parses a typical ss -ltnpH line with users column", () => {
+    const row = parseSsLine(
+      'LISTEN 0      4096      0.0.0.0:3000        0.0.0.0:*    users:(("node",pid=12345,fd=23))',
+    )
+    expect(row).toBeDefined()
+    expect(row!.pid).toBe(12345)
+    expect(row!.name).toBe("node")
+    expect(row!.proto).toBe("TCP")
+    expect(row!.port).toBe(3000)
+  })
+  test("ignores rows that are not LISTEN", () => {
+    expect(
+      parseSsLine('ESTAB 0      0         10.0.0.1:443       1.2.3.4:50000  users:(("nginx",pid=1,fd=10))'),
+    ).toBeUndefined()
   })
 })
 

@@ -3,17 +3,21 @@ import { spawn } from "node:child_process"
 import DESCRIPTION from "./process.txt"
 import * as Tool from "./tool"
 
-const ACTIONS = ["list", "kill"] as const
+const ACTIONS = ["list", "kill", "by_port", "info"] as const
 
 export const Parameters = Schema.Struct({
   action: Schema.Literals(ACTIONS).annotate({
-    description: "Action: 'list' to enumerate processes, 'kill' to terminate one.",
+    description:
+      "Action: 'list' to enumerate processes, 'kill' to terminate one, 'by_port' to find which process is listening on a TCP port, 'info' to look up a single PID by id.",
   }),
   name_pattern: Schema.optional(Schema.String.check(Schema.isMaxLength(200))).annotate({
-    description: "Case-insensitive substring matched against the process image name.",
+    description: "Case-insensitive substring matched against the process image name (used by 'list').",
   }),
   pid: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))).annotate({
-    description: "PID to kill. Required when action is 'kill'.",
+    description: "PID. Required for 'kill' or 'info'.",
+  }),
+  port: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(65535))).annotate({
+    description: "TCP port. Required for 'by_port'. Returns processes whose local listening socket binds this port.",
   }),
   force: Schema.optional(Schema.Boolean).annotate({
     description: "When killing, force-terminate (SIGKILL / taskkill /F) instead of requesting graceful exit.",
@@ -35,15 +39,25 @@ type ProcRow = {
   rss_kb?: number
 }
 
+type PortListener = {
+  pid: number
+  name?: string
+  proto: "TCP" | "UDP"
+  local_address: string
+  port: number
+}
+
 type Metadata = {
   platform: NodeJS.Platform
   backend: string
   action: Action
   name_pattern?: string
   pid?: number
+  port?: number
   force?: boolean
   limit?: number
   processes?: ProcRow[]
+  listeners?: PortListener[]
   match_count?: number
   total_seen?: number
   killed?: boolean
@@ -205,6 +219,129 @@ async function listUnix(signal: AbortSignal): Promise<{ rows: ProcRow[]; raw: st
   return { rows, raw: r.stdout }
 }
 
+// Parse a Windows `netstat -ano -p TCP` line. Format (whitespace-separated):
+//   "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1344"
+// Only LISTENING rows are interesting for "what's bound to port X".
+export function parseNetstatTcpLine(line: string): PortListener | undefined {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith("TCP") && !trimmed.startsWith("UDP")) return undefined
+  const tokens = trimmed.split(/\s+/)
+  if (tokens.length < 4) return undefined
+  const proto = tokens[0] === "UDP" ? "UDP" : "TCP"
+  const local = tokens[1]
+  // For TCP, the row layout is: PROTO LOCAL FOREIGN STATE PID
+  // For UDP, the layout is: PROTO LOCAL FOREIGN PID (no STATE column)
+  let pidIdx = -1
+  let stateOk = true
+  if (proto === "TCP") {
+    if (tokens.length < 5) return undefined
+    if (tokens[3] !== "LISTENING") stateOk = false
+    pidIdx = 4
+  } else {
+    pidIdx = 3
+  }
+  if (!stateOk) return undefined
+  const pid = parseInt(tokens[pidIdx], 10)
+  if (!Number.isFinite(pid)) return undefined
+  // local is HOST:PORT, but IPv6 looks like [::1]:80 — split from the right.
+  const colon = local.lastIndexOf(":")
+  if (colon < 0) return undefined
+  const host = local.slice(0, colon)
+  const port = parseInt(local.slice(colon + 1), 10)
+  if (!Number.isFinite(port)) return undefined
+  return { pid, proto, local_address: host, port }
+}
+
+// Parse a `lsof -nP -iTCP -sTCP:LISTEN -F pcLn` line stream. lsof -F emits one field per line, prefixed:
+//   p<pid>\nc<command>\n... n*:port (LISTEN)\n... TST=LISTEN
+// We only need to keep state across lines: current pid + name + ports.
+// We instead parse the simpler default `lsof -nP -iTCP:PORT -sTCP:LISTEN` table:
+//   COMMAND PID  USER ... NAME
+//   node 12345 user 23u IPv4 0xabc 0t0 TCP *:3000 (LISTEN)
+export function parseLsofLine(line: string): PortListener | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) return undefined
+  if (/^COMMAND\s+PID/i.test(trimmed)) return undefined
+  const tokens = trimmed.split(/\s+/)
+  if (tokens.length < 9) return undefined
+  const name = tokens[0]
+  const pid = parseInt(tokens[1], 10)
+  if (!Number.isFinite(pid)) return undefined
+  const proto = tokens[7] === "UDP" ? "UDP" : "TCP"
+  const addr = tokens[8]
+  // addr is HOST:PORT, possibly *:PORT or [::]:PORT
+  const colon = addr.lastIndexOf(":")
+  if (colon < 0) return undefined
+  const host = addr.slice(0, colon)
+  const port = parseInt(addr.slice(colon + 1), 10)
+  if (!Number.isFinite(port)) return undefined
+  return { pid, name, proto, local_address: host, port }
+}
+
+// Parse a `ss -ltnpH` (no header) line on Linux.
+// Format (LISTEN rows only since we passed -l):
+//   LISTEN 0      4096      0.0.0.0:3000        0.0.0.0:*    users:(("node",pid=12345,fd=23))
+export function parseSsLine(line: string): PortListener | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) return undefined
+  if (!/^LISTEN\b/i.test(trimmed)) return undefined
+  const tokens = trimmed.split(/\s+/)
+  if (tokens.length < 5) return undefined
+  const local = tokens[3]
+  const colon = local.lastIndexOf(":")
+  if (colon < 0) return undefined
+  const host = local.slice(0, colon)
+  const port = parseInt(local.slice(colon + 1), 10)
+  if (!Number.isFinite(port)) return undefined
+  // The users column is everything from token 4 onward.
+  const usersCol = tokens.slice(4).join(" ")
+  const m = /pid=(\d+)/.exec(usersCol)
+  const pid = m ? parseInt(m[1], 10) : NaN
+  if (!Number.isFinite(pid)) return undefined
+  const nameMatch = /\("([^"]+)",pid=/.exec(usersCol)
+  const name = nameMatch?.[1]
+  return { pid, name, proto: "TCP", local_address: host, port }
+}
+
+async function listenersWindows(port: number, signal: AbortSignal): Promise<{ rows: PortListener[]; raw: string; error?: string }> {
+  const r = await runProcess("netstat", ["-ano", "-p", "TCP"], signal, 8000)
+  if (r.code !== 0) return { rows: [], raw: r.stdout, error: r.stderr.trim() || `netstat exit=${r.code}` }
+  const rows: PortListener[] = []
+  for (const line of r.stdout.split(/\r?\n/)) {
+    const row = parseNetstatTcpLine(line)
+    if (row && row.port === port) rows.push(row)
+  }
+  return { rows, raw: r.stdout }
+}
+
+async function listenersUnix(port: number, signal: AbortSignal): Promise<{ rows: PortListener[]; raw: string; error?: string }> {
+  // Prefer lsof — present on macOS by default, common on Linux. Fall back to ss on Linux when lsof is missing.
+  const lsof = await runProcess("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], signal, 8000)
+  if (lsof.code === 0) {
+    const rows: PortListener[] = []
+    for (const line of lsof.stdout.split(/\r?\n/)) {
+      const row = parseLsofLine(line)
+      if (row && row.port === port) rows.push(row)
+    }
+    return { rows, raw: lsof.stdout }
+  }
+  // ss flags: -l listening, -t TCP, -n numeric, -p processes, -H no header
+  const ss = await runProcess("ss", ["-ltnpH", `sport`, `=`, `:${port}`], signal, 8000)
+  if (ss.code === 0) {
+    const rows: PortListener[] = []
+    for (const line of ss.stdout.split(/\r?\n/)) {
+      const row = parseSsLine(line)
+      if (row && row.port === port) rows.push(row)
+    }
+    return { rows, raw: ss.stdout }
+  }
+  return {
+    rows: [],
+    raw: lsof.stdout || ss.stdout,
+    error: (lsof.stderr || ss.stderr || `lsof exit=${lsof.code}, ss exit=${ss.code}`).trim(),
+  }
+}
+
 async function killWindows(pid: number, force: boolean, signal: AbortSignal) {
   const args = ["/PID", String(pid)]
   if (force) args.unshift("/F")
@@ -227,6 +364,101 @@ export const ProcessTool = Tool.define(
         const backend = platform === "win32" ? "tasklist/taskkill" : "ps/kill"
         const action = params.action
         const limit = params.limit ?? 50
+
+        if (action === "by_port") {
+          if (params.port === undefined) {
+            return done({
+              title: "process by_port: missing port",
+              metadata: { platform, backend, action, delivered: false, error: "port is required for by_port" },
+              output: "Error: 'port' is required when action is 'by_port'.",
+            })
+          }
+          yield* ctx.metadata({
+            title: `port ${params.port} listener probe`,
+            metadata: { platform, backend, action, port: params.port, delivered: false },
+          })
+          const out = yield* Effect.promise(async () => {
+            try {
+              if (platform === "win32") return await listenersWindows(params.port!, ctx.abort)
+              return await listenersUnix(params.port!, ctx.abort)
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err)
+              return { rows: [] as PortListener[], raw: "", error: msg }
+            }
+          })
+          if (out.error && out.rows.length === 0) {
+            return done({
+              title: `port ${params.port} probe failed`,
+              metadata: { platform, backend, action, port: params.port, delivered: false, error: out.error },
+              output: `Port ${params.port} probe failed (${backend === "tasklist/taskkill" ? "netstat" : "lsof/ss"}, ${platform}): ${out.error}. On Linux without lsof, install procps/iproute2 or run as root.`,
+            })
+          }
+          // For Windows, augment with names from tasklist (one tasklist call covers everyone).
+          let listeners = out.rows
+          if (listeners.length > 0 && platform === "win32") {
+            const tl = yield* Effect.promise(() => listWindows(ctx.abort))
+            const byPid = new Map(tl.rows.map((r) => [r.pid, r.name]))
+            listeners = listeners.map((l) => ({ ...l, name: byPid.get(l.pid) ?? l.name }))
+          }
+          if (listeners.length === 0) {
+            return done({
+              title: `port ${params.port}: nothing listening`,
+              metadata: { platform, backend, action, port: params.port, listeners: [], delivered: true },
+              output: `No process is listening on TCP port ${params.port}.`,
+            })
+          }
+          const lines = listeners.map((l) => `  ${String(l.pid).padStart(7)} ${l.name ?? "?"} (${l.proto} ${l.local_address}:${l.port})`)
+          return done({
+            title: `port ${params.port}: ${listeners.map((l) => l.pid).join(",")}`,
+            metadata: { platform, backend, action, port: params.port, listeners, delivered: true },
+            output: [`${listeners.length} listener(s) on TCP port ${params.port}:`, ...lines].join("\n"),
+          })
+        }
+
+        if (action === "info") {
+          if (params.pid === undefined) {
+            return done({
+              title: "process info: missing pid",
+              metadata: { platform, backend, action, delivered: false, error: "pid is required for info" },
+              output: "Error: 'pid' is required when action is 'info'.",
+            })
+          }
+          yield* ctx.metadata({
+            title: `process info ${params.pid}`,
+            metadata: { platform, backend, action, pid: params.pid, delivered: false },
+          })
+          const out = yield* Effect.promise(async () => {
+            try {
+              if (platform === "win32") return await listWindows(ctx.abort)
+              return await listUnix(ctx.abort)
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err)
+              return { rows: [] as ProcRow[], raw: "", error: msg }
+            }
+          })
+          if (out.error) {
+            return done({
+              title: `process info ${params.pid} failed`,
+              metadata: { platform, backend, action, pid: params.pid, delivered: false, error: out.error },
+              output: `Process listing failed (${backend}, ${platform}): ${out.error}.`,
+            })
+          }
+          const row = out.rows.find((r) => r.pid === params.pid)
+          if (!row) {
+            return done({
+              title: `pid ${params.pid} not found`,
+              metadata: { platform, backend, action, pid: params.pid, processes: [], delivered: true },
+              output: `No process with PID ${params.pid} (scanned ${out.rows.length} entries).`,
+            })
+          }
+          const cpu = row.cpu_percent !== undefined ? ` cpu=${row.cpu_percent.toFixed(1)}%` : ""
+          const mem = row.rss_kb !== undefined ? ` rss=${row.rss_kb}KB` : ""
+          return done({
+            title: `pid ${params.pid}: ${row.name}`,
+            metadata: { platform, backend, action, pid: params.pid, processes: [row], delivered: true },
+            output: `PID ${params.pid}: ${row.name}${cpu}${mem}`,
+          })
+        }
 
         if (action === "kill") {
           if (params.pid === undefined) {
@@ -375,4 +607,12 @@ export const ProcessTool = Tool.define(
   }),
 )
 
-export const __testing = { parseCsvLine, parseTasklistCsvLine, parsePsLine, runProcess }
+export const __testing = {
+  parseCsvLine,
+  parseTasklistCsvLine,
+  parsePsLine,
+  parseNetstatTcpLine,
+  parseLsofLine,
+  parseSsLine,
+  runProcess,
+}
