@@ -48,6 +48,7 @@ import { useCheckServerHealth } from "./utils/server-health"
 
 const HomeRoute = lazy(() => import("@/pages/home"))
 const AutomationsRoute = lazy(() => import("@/pages/automations"))
+const ChatSearchRoute = lazy(() => import("@/pages/chat-search"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
 const Loading = () => <div class="size-full" />
@@ -303,6 +304,7 @@ export function AppInterface(props: {
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />
                     <Route path="/automations" component={AutomationsRoute} />
+                    <Route path="/chat-search" component={ChatSearchRoute} />
                     <Route path="/session/:id?" component={SessionRoute} />
                   </Route>
                 </Dynamic>

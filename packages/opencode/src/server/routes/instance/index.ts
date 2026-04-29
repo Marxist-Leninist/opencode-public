@@ -33,6 +33,7 @@ import { SyncRoutes } from "./sync"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
 import { AutomationRoutes } from "./automation"
+import { ChatSearchRoutes } from "./chat_search"
 
 export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
   const app = new Hono()
@@ -100,6 +101,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/provider", ProviderRoutes())
     .route("/sync", SyncRoutes())
     .route("/automation", AutomationRoutes())
+    .route("/chat-search", ChatSearchRoutes())
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
