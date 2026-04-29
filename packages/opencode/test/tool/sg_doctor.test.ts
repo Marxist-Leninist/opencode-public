@@ -45,6 +45,25 @@ describe("sg_doctor probes", () => {
         )
         return
       }
+      // Newer Ring shape: drop note is in reasoning_content, not content.
+      if (req.url === "/v1-textonly-reasoning/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "However, note that the user's message does not contain any non-text attachment.",
+                  reasoning_content:
+                    'We are given a specific instruction: "Reply with exactly: probe-ok [NOTE: 1 non-text attachment(s) (images/files/audio) were dropped because the Ring-2.5-1T text proxy does not yet support multimodal input.]"',
+                },
+              },
+            ],
+          }),
+        )
+        return
+      }
       // Same as v1-textonly but with the response truncated mid-note before "were dropped" — happens at low max_tokens.
       if (req.url === "/v1-textonly-truncated/chat/completions" && req.method === "POST") {
         res.writeHead(200, { "content-type": "application/json" })
@@ -170,6 +189,13 @@ describe("sg_doctor probes", () => {
 
   test("probeRingMultimodal: text-only proxy is reported as ok with text-only detail", async () => {
     const result = await probeRingMultimodal(`${baseUrl}/v1-textonly`, "goodkey", 6000)
+    expect(result.target).toBe("ring_multimodal")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/text-only/i)
+  })
+
+  test("probeRingMultimodal: drop note in reasoning_content is still detected as text-only", async () => {
+    const result = await probeRingMultimodal(`${baseUrl}/v1-textonly-reasoning`, "goodkey", 6000)
     expect(result.target).toBe("ring_multimodal")
     expect(result.ok).toBe(true)
     expect(result.detail).toMatch(/text-only/i)

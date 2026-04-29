@@ -179,7 +179,10 @@ async function probeRingMultimodal(
   let text = ""
   try {
     const json: any = await r.res.json()
-    text = String(json?.choices?.[0]?.message?.content ?? "")
+    const msg = json?.choices?.[0]?.message ?? {}
+    // Newer Ring responses route the system-injected "[NOTE: …were dropped]"
+    // banner into reasoning_content rather than content. We need to scan both.
+    text = [msg.content, msg.reasoning_content].filter((s) => typeof s === "string").join("\n")
   } catch {}
   // The proxy injects something like "[NOTE: 1 non-text attachment(s) (images/files/audio) were dropped because …]"
   // into the user prompt before the model sees it. The model echoes enough of that for either substring to be
