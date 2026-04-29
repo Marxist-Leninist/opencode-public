@@ -1,0 +1,37 @@
+Test, match, replace, split, or extract using a JavaScript-flavoured regular expression.
+
+A pure-text regex utility — no shell, no files, no escaping headaches. Use this when you want to apply a regex over a string in tool code rather than spawning sed/grep/perl. For multi-file searches across the project tree use `grep` instead — this tool is for transforming a string you already have.
+
+Parameters:
+- `action` (required): one of:
+  - `test` — return whether the pattern matches at all (boolean).
+  - `match` — return the first match, with captured groups and named groups.
+  - `match_all` — return every non-overlapping match (forces global flag if not present).
+  - `replace` — replace the first match. Requires `replacement`.
+  - `replace_all` — replace every match. Requires `replacement`. Forces global flag.
+  - `split` — split the input by the pattern.
+  - `extract` — return only the captured group(s). With `group`, returns just that group; without, returns all groups concatenated. Always processes every match.
+- `pattern` (required): the regex source. Do NOT include the surrounding `/.../flags` slashes — pass flags via `flags`.
+- `value` (required): the input string to operate on.
+- `flags` (optional): combination of `i` (case-insensitive), `m` (multiline ^/$), `s` (dotall), `g` (global — auto-added for actions that need it), `u` (unicode), `y` (sticky). Default `""`. Duplicates are de-duplicated.
+- `replacement` (optional): replacement string for `replace`/`replace_all`. Supports `$1`, `$2`, `$&` (whole match), `$<name>` (named group). Backreferences are JavaScript-style.
+- `limit` (optional): cap on returned matches/results. Default 1000. Applies to `match_all`, `extract`, `split`.
+- `group` (optional): for `extract`, the capture-group name or 1-based index to pull. Default returns all groups joined per match.
+
+Behavior:
+- Returns metadata with `count` (number of matches) and a `matches` array where applicable. Each match entry: `{ match, index, groups (positional, 1-based), named_groups }`.
+- Pattern compile errors surface clearly.
+- Catastrophic-backtracking risk: each match is bounded by `value.length` per match; `limit` caps the result count for global actions.
+
+Examples:
+- Test if a string is a UUID-ish: `{ "action": "test", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "value": "550e8400-e29b-41d4-a716-446655440000", "flags": "i" }`
+- Get all email addresses: `{ "action": "match_all", "pattern": "[\\w.-]+@[\\w-]+\\.[\\w.-]+", "value": "..." }`
+- Replace tabs with two spaces: `{ "action": "replace_all", "pattern": "\\t", "value": "...", "replacement": "  " }`
+- Extract version from filename: `{ "action": "extract", "pattern": "v(\\d+\\.\\d+\\.\\d+)", "value": "release-v1.2.3.zip", "group": 1 }`
+- Split CSV row: `{ "action": "split", "pattern": ",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", "value": "a,\"b,c\",d" }`
+- Named group: `{ "action": "match", "pattern": "(?<scheme>https?)://(?<host>[^/]+)", "value": "https://example.com/x" }`
+
+Do NOT use this tool to:
+- Search across files — use `grep`.
+- Validate complex inputs (URLs, emails, etc) where a real parser exists — regex matches are best for narrow patterns.
+- Parse JSON / YAML / HTML — use `json` / future `yaml` / a real parser.

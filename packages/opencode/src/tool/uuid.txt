@@ -1,0 +1,35 @@
+Generate or validate UUIDs.
+
+Use this when you need correlation IDs, idempotency keys, request IDs, or test fixtures. UUIDs from this tool are RFC 4122 compliant. v7 (time-ordered) is preferred for new IDs because they sort by creation time and play nicely with database indexes; v4 (random) is fine when ordering does not matter.
+
+Parameters:
+- `action` (required): one of:
+  - `v4` — generate cryptographically random UUID(s).
+  - `v7` — generate time-ordered UUID(s) (Unix-millis prefix + random tail).
+  - `validate` — return whether `value` is a syntactically valid UUID.
+  - `parse` — parse a UUID and return `{ valid, version, variant, timestamp_ms? }`.
+  - `nil` — return `00000000-0000-0000-0000-000000000000`.
+  - `urn` — wrap a UUID as a URN (`urn:uuid:...`); requires `value`.
+- `value` (optional): UUID string for validate/parse/urn.
+- `count` (optional): number of UUIDs to generate. Default 1, max 1000.
+- `format` (optional): for v4/v7/nil, output style:
+  - `canonical` (default) — lowercase 8-4-4-4-12 hex with dashes.
+  - `upper` — same shape, uppercase.
+  - `compact` — 32 hex chars, no dashes.
+  - `urn` — `urn:uuid:<canonical>`.
+
+Behavior:
+- `metadata.uuids` is an array even for count=1.
+- For `parse`, `metadata.timestamp_ms` is populated for v7 (Unix millis prefix).
+- `validate` accepts canonical, upper, or compact (no-dash) shapes; all map to canonical internally.
+
+Examples:
+- One v7 UUID: `{ "action": "v7" }`
+- Five v4 UUIDs: `{ "action": "v4", "count": 5 }`
+- Validate: `{ "action": "validate", "value": "550e8400-e29b-41d4-a716-446655440000" }`
+- Parse a v7 to recover its timestamp: `{ "action": "parse", "value": "01928c4e-... " }`
+- Compact format for use in URLs: `{ "action": "v4", "format": "compact" }`
+
+Do NOT use this tool to:
+- Generate cryptographic keys / tokens / secrets — UUID randomness is not a substitute for `crypto.randomBytes`.
+- Generate sortable session IDs at huge scale where strict monotonicity is required (v7 has 18-bit per-ms entropy, very low chance of inversion within the same ms).

@@ -30,6 +30,9 @@ import { JsonTool } from "./json"
 import { CronTool } from "./cron"
 import { DateTimeTool } from "./datetime"
 import { EncodeTool } from "./encode"
+import { HttpTool } from "./http"
+import { RegexTool } from "./regex"
+import { UuidTool } from "./uuid"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -151,6 +154,9 @@ export const layer: Layer.Layer<
     const crontool = yield* CronTool
     const datetimetool = yield* DateTimeTool
     const encodetool = yield* EncodeTool
+    const httptool = yield* HttpTool
+    const regextool = yield* RegexTool
+    const uuidtool = yield* UuidTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -258,6 +264,9 @@ export const layer: Layer.Layer<
           cron: Tool.init(crontool),
           datetime: Tool.init(datetimetool),
           encode: Tool.init(encodetool),
+          http: Tool.init(httptool),
+          regex: Tool.init(regextool),
+          uuid: Tool.init(uuidtool),
         })
 
         return {
@@ -296,6 +305,9 @@ export const layer: Layer.Layer<
             tool.cron,
             tool.datetime,
             tool.encode,
+            tool.http,
+            tool.regex,
+            tool.uuid,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

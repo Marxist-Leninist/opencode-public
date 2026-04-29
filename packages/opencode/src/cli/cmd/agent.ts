@@ -43,6 +43,9 @@ const AVAILABLE_TOOLS = [
   "cron",
   "datetime",
   "encode",
+  "http",
+  "regex",
+  "uuid",
 ]
 
 const AgentCreateCommand = cmd({

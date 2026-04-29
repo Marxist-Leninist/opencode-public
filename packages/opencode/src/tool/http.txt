@@ -1,0 +1,38 @@
+Make an HTTP request to a URL and return the response.
+
+A general-purpose HTTP client for any method (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Use this when `webfetch` is too narrow — webfetch is GET-only and content-type-coerces the body to text/markdown/html. `http` gives you full control: arbitrary methods, JSON/text/form bodies, custom headers, query params, basic+bearer auth, response parsing, status acceptance.
+
+Parameters:
+- `method` (required): one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`. Case-insensitive on input.
+- `url` (required): full http(s) URL.
+- `query` (optional): record of query parameters merged into the URL. Values are url-encoded; existing query string in `url` is preserved.
+- `headers` (optional): record of request headers, e.g. `{ "X-Foo": "bar" }`. `Content-Type` is auto-set when `body_type` is `json` or `form`, but an explicit header wins.
+- `body` (optional): request body. May be a string (sent as-is) or any JSON value (object/array/number/etc) when `body_type=json` or `body_type=auto` and the value is non-string.
+- `body_type` (optional): `auto` (default — JSON if body is non-string, text if body is string), `json` (force JSON.stringify + Content-Type: application/json), `text` (raw string), `form` (url-encode object as application/x-www-form-urlencoded), `raw_base64` (decode base64 string into bytes).
+- `auth` (optional): one of:
+  - `{ "type": "bearer", "token": "..." }` → adds `Authorization: Bearer ...`
+  - `{ "type": "basic", "username": "u", "password": "p" }` → adds `Authorization: Basic <b64>`
+- `timeout_ms` (optional): request timeout in ms. Default 30000, max 600000 (10 min).
+- `follow_redirects` (optional): default `true`. When `false`, returns the redirect response (3xx) without following.
+- `max_response_bytes` (optional): cap on response body bytes. Default 5 MiB. Larger responses are truncated and `metadata.truncated_response = true`.
+- `parse_response` (optional): how to render the response body. `auto` (default — JSON when Content-Type is JSON-ish, else text), `text` (always text), `json` (force JSON.parse, error on failure), `raw_base64` (return base64 of bytes — for binary responses).
+- `accept_status` (optional): array of accepted HTTP status codes or ranges. Default `[200, 201, 202, 204, 205, 206]` (i.e. 2xx). Use `[100, 999]` to accept all. A non-accepted status throws.
+
+Behavior:
+- Always returns the response body (parsed per `parse_response`) as the tool output.
+- Metadata: `{ status, status_text, response_headers, request_headers (sanitized), elapsed_ms, response_bytes, parsed_as, truncated_response, redirected, final_url }`.
+- `Authorization` header is redacted in the metadata's `request_headers` echo.
+- Aborts cleanly when the agent's abort signal fires (e.g. user cancellation).
+
+Examples:
+- POST JSON: `{ "method": "POST", "url": "https://api.example.com/v1/items", "body": { "name": "foo" }, "auth": { "type": "bearer", "token": "sk-..." } }`
+- Form post: `{ "method": "POST", "url": "https://example.com/login", "body": { "user": "u", "pass": "p" }, "body_type": "form" }`
+- Custom headers + query: `{ "method": "GET", "url": "https://api.github.com/repos/foo/bar", "query": { "per_page": "100" }, "headers": { "Accept": "application/vnd.github+json" } }`
+- DELETE: `{ "method": "DELETE", "url": "https://api.example.com/v1/items/42", "auth": { "type": "bearer", "token": "sk-..." } }`
+- Force JSON parse: `{ "method": "GET", "url": "https://example.com/data", "parse_response": "json" }`
+- Allow 4xx: `{ "method": "GET", "url": "https://example.com/missing", "accept_status": [200, 404] }`
+
+Do NOT use this tool to:
+- Download a file to disk — use the `download` tool (resumes, progress, hash verification).
+- Render a web page as markdown for reading — use the `webfetch` tool (it does the HTML→markdown conversion).
+- Make a probe (DNS+TCP+HTTP latency) — use the `net_check` tool.
