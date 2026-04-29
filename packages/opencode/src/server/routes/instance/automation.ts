@@ -7,7 +7,7 @@ import { MessageID, SessionID } from "@/session/schema"
 import { lazy } from "@/util/lazy"
 import { jsonRequest } from "./trace"
 
-const ACTIONS = new Set(["create", "update", "delete", "enable", "disable", "run_now", "logs", "history"])
+const ACTIONS = new Set(["create", "update", "delete", "enable", "disable", "run_now", "status", "logs", "history"])
 
 function bodyParams(c: HonoContext) {
   return Effect.promise(async () => {

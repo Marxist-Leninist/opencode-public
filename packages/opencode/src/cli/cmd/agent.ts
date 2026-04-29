@@ -29,6 +29,7 @@ const AVAILABLE_TOOLS = [
   "hash",
   "notify",
   "open",
+  "clipboard",
   "automation",
 ]
 

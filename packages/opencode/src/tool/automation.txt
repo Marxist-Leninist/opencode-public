@@ -6,6 +6,7 @@ What it does:
 - Stores each automation definition locally in OpenCode's data directory.
 - Writes the automation prompt to a separate prompt file.
 - Writes a runner `.cmd` file that launches `opencode-sg.cmd run` unattended with `OPENCODE_SG_PERMISSION_MODE=allow` and captures stdout/stderr to a per-run log file.
+- Stores a per-automation session id so later scheduled runs continue the same automation chat instead of creating endless one-prompt chats.
 - Records each scheduled run in a JSONL history file with timestamp and exit code.
 - On Windows, optionally installs/enables/disables/deletes the matching Scheduled Task.
 
@@ -32,9 +33,9 @@ Important behavior:
 - `install` defaults to true on create/update/enable. Set `install=false` to save the routine definition without touching OS scheduling.
 - `working_directory` defaults to the current project directory.
 - `model` and `agent` are optional; omit them to use SG OpenCode defaults.
-- The scheduled run starts a new SG OpenCode session, not the current live chat turn.
+- The first scheduled run starts a new SG OpenCode session. Later runs continue that automation's saved session.
 - Keep prompts specific and self-contained. Scheduled runs should know what to do without asking questions.
-- The runner exposes `OPENCODE_SG_AUTOMATION_RUN=1` and `OPENCODE_SG_AUTOMATION_ID=<id>` env vars so the agent can detect unattended mode.
+- The runner exposes `OPENCODE_SG_AUTOMATION_RUN=1`, `OPENCODE_SG_AUTOMATION_ID=<id>`, and `OPENCODE_SG_AUTOMATION_SESSION_FILE=<path>` env vars so the agent can detect unattended mode and persist the chat link.
 - Logs and history are kept on a rolling basis (latest 50 runs / 200 history entries) so disk usage stays bounded.
 
 Examples:

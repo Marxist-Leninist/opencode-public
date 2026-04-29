@@ -26,6 +26,7 @@ type AutomationDefinition = {
   definition_path: string
   prompt_path: string
   script_path: string
+  session_path?: string
   log_dir?: string
   history_path?: string
   created_at: string
@@ -36,6 +37,11 @@ type ToolResult = {
   title: string
   output: string
   metadata?: Record<string, unknown>
+}
+type Activity = {
+  title: string
+  output: string
+  loading?: boolean
 }
 
 type RawSdkClient = {
@@ -97,6 +103,7 @@ export default function AutomationsPage() {
   const [selected, setSelected] = createSignal<string | undefined>()
   const [busy, setBusy] = createSignal<string | undefined>()
   const [output, setOutput] = createSignal("")
+  const [activity, setActivity] = createStore<Record<string, Activity>>({})
 
   const emptyForm = (): FormState => ({
     id: "",
@@ -192,22 +199,101 @@ export default function AutomationsPage() {
     }
   }
 
-  const runAction = async (item: AutomationDefinition, action: "enable" | "disable" | "run_now" | "logs" | "history") => {
+  // Tracks an in-flight log-tail loop so a second Run doesn't stack pollers.
+  let tailInterval: ReturnType<typeof setInterval> | undefined
+  const stopTail = () => {
+    if (tailInterval) {
+      clearInterval(tailInterval)
+      tailInterval = undefined
+    }
+  }
+
+  // After a Run, the scheduled task runs for minutes in the background. Without
+  // live feedback the GUI looks frozen. This polls the /logs action every 3s
+  // and streams the tail into the output area until it stops growing for 12s
+  // (run finished) or 10 min cap.
+  const startLogTail = (item: AutomationDefinition) => {
+    stopTail()
+    const startedAt = Date.now()
+    let lastLen = -1
+    let stableSince = Date.now()
+    const startMessage = `[automation: ${item.id}] starting - tailing log...`
+    setOutput(startMessage)
+    setActivity(item.id, { title: "Running automation", output: startMessage, loading: true })
+    tailInterval = setInterval(async () => {
+      try {
+        const tail = await request<ToolResult>(`/${encodeURIComponent(item.id)}/logs`, {
+          method: "POST",
+          body: {},
+        })
+        setOutput(tail.output ?? "")
+        setActivity(item.id, { title: tail.title, output: tail.output ?? "", loading: true })
+        const len = (tail.output ?? "").length
+        if (len !== lastLen) {
+          lastLen = len
+          stableSince = Date.now()
+        } else if (Date.now() - stableSince >= 12_000) {
+          stopTail()
+          setBusy(undefined)
+          setActivity(item.id, { title: tail.title, output: tail.output ?? "" })
+          await itemsActions.refetch()
+        }
+        if (Date.now() - startedAt >= 10 * 60_000) {
+          stopTail()
+          setBusy(undefined)
+        }
+      } catch {
+        // Log file may not exist yet on the first poll; keep trying.
+      }
+    }, 3_000)
+  }
+
+  const runAction = async (
+    item: AutomationDefinition,
+    action: "enable" | "disable" | "run_now" | "status" | "logs" | "history",
+  ) => {
     setBusy(`${action}:${item.id}`)
+    const label =
+      action === "run_now"
+        ? "Starting"
+        : action === "status"
+          ? "Checking status"
+          : action === "logs"
+            ? "Loading logs"
+            : action === "history"
+              ? "Loading history"
+              : action === "enable"
+                ? "Enabling"
+                : "Pausing"
+    setActivity(item.id, {
+      title: `${label}...`,
+      output: "Waiting for the local automation service.",
+      loading: true,
+    })
     try {
       const result = await request<ToolResult>(`/${encodeURIComponent(item.id)}/${action}`, {
         method: "POST",
         body: {},
       })
       setOutput(result.output)
+      setActivity(item.id, { title: result.title, output: result.output })
       await itemsActions.refetch()
       if (action === "enable" || action === "disable") {
         showToast({ variant: "success", title: result.title })
       }
+      if (action === "run_now") {
+        showToast({ variant: "success", title: `Running ${item.id}...` })
+        // Briefly wait for the runner script to start writing, then live-tail
+        // its log into the output area until the run finishes.
+        setBusy(`tail:${item.id}`)
+        setTimeout(() => startLogTail(item), 2_000)
+      }
     } catch (error) {
+      setActivity(item.id, { title: "Automation failed", output: parseError(error) })
       showToast({ variant: "error", title: "Automation failed", description: parseError(error) })
     } finally {
-      setBusy(undefined)
+      // Don't clear busy when we're about to hand off to the tail loop.
+      if (action !== "run_now") setBusy(undefined)
     }
   }
 
@@ -233,6 +319,9 @@ export default function AutomationsPage() {
       checked ? [...new Set([...form.days_of_week, day])] : form.days_of_week.filter((item) => item !== day),
     )
   }
+
+  const busyFor = (item: AutomationDefinition, action: string) => busy() === `${action}:${item.id}`
+  const busyItem = (item: AutomationDefinition) => Boolean(busy()?.endsWith(`:${item.id}`))
 
   return (
     <main class="size-full overflow-y-auto bg-background-base">
@@ -304,26 +393,66 @@ export default function AutomationsPage() {
                           </span>
                         </div>
                         <div class="mt-3 flex flex-wrap gap-2 pl-10">
-                          <Button size="small" icon="arrow-right" onClick={() => runAction(item, "run_now")}>
-                            Run
+                          <Button
+                            size="small"
+                            icon="arrow-right"
+                            disabled={busyItem(item)}
+                            onClick={() => runAction(item, "run_now")}
+                          >
+                            {busyFor(item, "run_now") || busyFor(item, "tail") ? "Running..." : "Run"}
                           </Button>
                           <Button
                             size="small"
                             icon={item.enabled ? "circle-ban-sign" : "check-small"}
+                            disabled={busyItem(item)}
                             onClick={() => runAction(item, item.enabled ? "disable" : "enable")}
                           >
-                            {item.enabled ? "Pause" : "Enable"}
+                            {busyFor(item, "disable") ? "Pausing..." : busyFor(item, "enable") ? "Enabling..." : item.enabled ? "Pause" : "Enable"}
                           </Button>
-                          <Button size="small" icon="status" variant="ghost" onClick={() => runAction(item, "history")}>
-                            History
+                          <Button
+                            size="small"
+                            icon="status"
+                            variant="ghost"
+                            disabled={busyItem(item)}
+                            onClick={() => runAction(item, "status")}
+                          >
+                            {busyFor(item, "status") ? "Checking..." : "Status"}
                           </Button>
-                          <Button size="small" icon="terminal" variant="ghost" onClick={() => runAction(item, "logs")}>
-                            Logs
+                          <Button
+                            size="small"
+                            icon="status"
+                            variant="ghost"
+                            disabled={busyItem(item)}
+                            onClick={() => runAction(item, "history")}
+                          >
+                            {busyFor(item, "history") ? "Loading..." : "History"}
+                          </Button>
+                          <Button
+                            size="small"
+                            icon="terminal"
+                            variant="ghost"
+                            disabled={busyItem(item)}
+                            onClick={() => runAction(item, "logs")}
+                          >
+                            {busyFor(item, "logs") ? "Loading..." : "Logs"}
                           </Button>
                           <Button size="small" icon="trash" variant="ghost" onClick={() => remove(item)}>
                             Delete
                           </Button>
                         </div>
+                        <Show when={activity[item.id]}>
+                          {(info) => (
+                            <div
+                              class="mt-3 ml-10 min-w-0 rounded-md border border-border-weaker-base bg-surface-base px-3 py-2"
+                              classList={{ "animate-pulse": info().loading }}
+                            >
+                              <div class="mb-1 truncate text-12-medium text-text-strong">{info().title}</div>
+                              <pre class="max-h-48 overflow-auto whitespace-pre-wrap text-12-regular text-text-base">
+                                {info().output}
+                              </pre>
+                            </div>
+                          )}
+                        </Show>
                       </article>
                     )}
                   </For>

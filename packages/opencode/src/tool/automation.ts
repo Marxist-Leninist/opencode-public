@@ -16,6 +16,7 @@ const ACTIONS = [
   "enable",
   "disable",
   "run_now",
+  "status",
   "logs",
   "history",
 ] as const
@@ -108,6 +109,7 @@ export type AutomationDefinition = {
   definition_path: string
   prompt_path: string
   script_path: string
+  session_path: string
   log_dir: string
   history_path: string
   created_at: string
@@ -135,6 +137,7 @@ type Metadata = {
   definition_path?: string
   prompt_path?: string
   script_path?: string
+  session_path?: string
   log_dir?: string
   history_path?: string
   log_path?: string
@@ -143,6 +146,12 @@ type Metadata = {
   log_truncated?: boolean
   history_count?: number
   exit_code?: number | null
+  running?: boolean
+  scheduler_status?: string
+  scheduler_last_result?: string
+  scheduler_next_run_time?: string
+  scheduler_task_to_run?: string
+  latest_log_path?: string
 }
 
 const done = (result: Tool.ExecuteResult<Metadata>) => result
@@ -158,6 +167,7 @@ function dirs() {
     definitions: path.join(root, "definitions"),
     prompts: path.join(root, "prompts"),
     scripts: path.join(root, "scripts"),
+    sessions: path.join(root, "sessions"),
     logs: path.join(root, "logs"),
     history: path.join(root, "history"),
   }
@@ -239,18 +249,32 @@ function scriptPath(id: string) {
   return path.join(dirs().scripts, `${id}.cmd`)
 }
 
+function sessionPath(id: string) {
+  return path.join(dirs().sessions, `${id}.txt`)
+}
+
+function normalizeDefinition(def: AutomationDefinition): AutomationDefinition {
+  return {
+    ...def,
+    session_path: def.session_path ?? sessionPath(def.id),
+    log_dir: def.log_dir ?? logDir(def.id),
+    history_path: def.history_path ?? historyPath(def.id),
+  }
+}
+
 async function ensureDirs() {
   const d = dirs()
   await fs.mkdir(d.definitions, { recursive: true })
   await fs.mkdir(d.prompts, { recursive: true })
   await fs.mkdir(d.scripts, { recursive: true })
+  await fs.mkdir(d.sessions, { recursive: true })
   await fs.mkdir(d.logs, { recursive: true })
   await fs.mkdir(d.history, { recursive: true })
 }
 
 async function readDefinition(id: string): Promise<AutomationDefinition> {
   const raw = await fs.readFile(definitionPath(id), "utf8")
-  return JSON.parse(raw) as AutomationDefinition
+  return normalizeDefinition(JSON.parse(raw) as AutomationDefinition)
 }
 
 async function readAllDefinitions() {
@@ -280,8 +304,10 @@ function timestampCommand() {
 }
 
 function buildRunnerScript(def: AutomationDefinition) {
+  const sessionFile = def.session_path ?? sessionPath(def.id)
   const args = [
     "run",
+    "!SESSION_ARGS!",
     "--title",
     cmdQuote(def.title),
     ...(def.model ? ["--model", cmdQuote(def.model)] : []),
@@ -300,6 +326,11 @@ function buildRunnerScript(def: AutomationDefinition) {
     `cd /d ${cmdQuote(def.working_directory)}`,
     `if not exist ${cmdQuote(def.log_dir)} mkdir ${cmdQuote(def.log_dir)}`,
     `if not exist ${cmdQuote(path.dirname(def.history_path))} mkdir ${cmdQuote(path.dirname(def.history_path))}`,
+    `if not exist ${cmdQuote(path.dirname(sessionFile))} mkdir ${cmdQuote(path.dirname(sessionFile))}`,
+    `set "SESSION_FILE=${sessionFile}"`,
+    `set "OPENCODE_SG_AUTOMATION_SESSION_FILE=!SESSION_FILE!"`,
+    `set "SESSION_ARGS="`,
+    `if exist "!SESSION_FILE!" for /f "usebackq delims=" %%s in ("!SESSION_FILE!") do if not "%%s"=="" set "SESSION_ARGS=--session ""%%s"""`,
     `for /f "delims=" %%a in ('${timestampCommand()}') do set "TS=%%a"`,
     "if not defined TS set \"TS=00000000-000000\"",
     `set "LOG=${def.log_dir}\\!TS!.log"`,
@@ -307,6 +338,7 @@ function buildRunnerScript(def: AutomationDefinition) {
     `> "!LOG!" echo === SG OpenCode automation: ${def.id} (!TS!) ===`,
     `>> "!LOG!" echo cwd: ${def.working_directory}`,
     `>> "!LOG!" echo title: ${def.title}`,
+    `>> "!LOG!" echo session file: !SESSION_FILE!`,
     "echo. >> \"!LOG!\"",
     `type ${cmdQuote(def.prompt_path)} | call ${cmdQuote(launcherPath())} ${args.join(" ")} 1>> "!LOG!" 2>&1`,
     "set EXITCODE=!errorlevel!",
@@ -314,8 +346,10 @@ function buildRunnerScript(def: AutomationDefinition) {
     "if not defined END_TS set \"END_TS=!TS!\"",
     "echo. >> \"!LOG!\"",
     `>> "!LOG!" echo === end (exit !EXITCODE!) at !END_TS! ===`,
+    `set "SESSION_ID="`,
+    `if exist "!SESSION_FILE!" for /f "usebackq delims=" %%s in ("!SESSION_FILE!") do if not "%%s"=="" set "SESSION_ID=%%s"`,
     "set \"LOG_JSON=!LOG:\\=\\\\!\"",
-    `>> "!HIST!" echo {"id":"${def.id}","ts":"!TS!","exit":!EXITCODE!,"log":"!LOG_JSON!","end_ts":"!END_TS!"}`,
+    `>> "!HIST!" echo {"id":"${def.id}","ts":"!TS!","exit":!EXITCODE!,"log":"!LOG_JSON!","end_ts":"!END_TS!","session_id":"!SESSION_ID!"}`,
     "endlocal & exit /b %EXITCODE%",
     "",
   ].join("\r\n")
@@ -344,10 +378,11 @@ function buildVbsLauncher(scriptPath: string) {
 
 async function writeDefinition(def: AutomationDefinition) {
   await ensureDirs()
-  await fs.writeFile(def.prompt_path, def.prompt, "utf8")
-  await fs.writeFile(def.script_path, buildRunnerScript(def), "utf8")
-  await fs.writeFile(vbsPath(def.script_path), buildVbsLauncher(def.script_path), "utf8")
-  await fs.writeFile(def.definition_path, JSON.stringify(def, null, 2), "utf8")
+  const normalized = normalizeDefinition(def)
+  await fs.writeFile(normalized.prompt_path, normalized.prompt, "utf8")
+  await fs.writeFile(normalized.script_path, buildRunnerScript(normalized), "utf8")
+  await fs.writeFile(vbsPath(normalized.script_path), buildVbsLauncher(normalized.script_path), "utf8")
+  await fs.writeFile(normalized.definition_path, JSON.stringify(normalized, null, 2), "utf8")
 }
 
 function schtasksCreateArgs(def: AutomationDefinition) {
@@ -415,6 +450,54 @@ function runProcess(command: string, args: string[], signal: AbortSignal, timeou
   })
 }
 
+type ParsedTaskQuery = {
+  status?: string
+  last_result?: string
+  next_run_time?: string
+  task_to_run?: string
+  scheduled_task_state?: string
+}
+
+function parseTaskQuery(text: string): ParsedTaskQuery {
+  const out: Record<string, string> = {}
+  let current: string | undefined
+  for (const raw of text.split(/\r?\n/)) {
+    const match = /^([^:]+):\s*(.*)$/.exec(raw)
+    if (match) {
+      current = match[1].trim().toLowerCase()
+      out[current] = match[2].trim()
+      continue
+    }
+    if (current && raw.trim()) out[current] = `${out[current]} ${raw.trim()}`.trim()
+  }
+  return {
+    status: out.status,
+    last_result: out["last result"],
+    next_run_time: out["next run time"],
+    task_to_run: out["task to run"],
+    scheduled_task_state: out["scheduled task state"],
+  }
+}
+
+async function schedulerStatus(def: AutomationDefinition, signal: AbortSignal) {
+  const empty: ParsedTaskQuery = {}
+  if (process.platform !== "win32") {
+    return {
+      code: 0,
+      stdout: "",
+      stderr: "OS scheduled task status is only implemented on Windows.",
+      parsed: empty,
+    }
+  }
+  const result = await runProcess(
+    "schtasks.exe",
+    ["/Query", "/TN", def.task_name, "/FO", "LIST", "/V"],
+    signal,
+    5000,
+  )
+  return { ...result, parsed: parseTaskQuery(result.stdout) }
+}
+
 async function scheduler(action: "create" | "delete" | "enable" | "disable" | "run", def: AutomationDefinition, signal: AbortSignal) {
   if (process.platform !== "win32") {
     return { code: 0, stdout: "", stderr: "OS scheduled task install is only implemented on Windows." }
@@ -423,7 +506,7 @@ async function scheduler(action: "create" | "delete" | "enable" | "disable" | "r
   if (action === "delete") return runProcess("schtasks.exe", ["/Delete", "/TN", def.task_name, "/F"], signal)
   if (action === "enable") return runProcess("schtasks.exe", ["/Change", "/TN", def.task_name, "/ENABLE"], signal)
   if (action === "disable") return runProcess("schtasks.exe", ["/Change", "/TN", def.task_name, "/DISABLE"], signal)
-  return runProcess("schtasks.exe", ["/Run", "/TN", def.task_name], signal)
+  return runProcess("schtasks.exe", ["/Run", "/TN", def.task_name], signal, 5000)
 }
 
 function schedulerFailure(result: { code: number | null; stdout: string; stderr: string }) {
@@ -527,6 +610,7 @@ export const AutomationStore = {
   history: (id: string) => readHistory(sanitizeId(id)),
   latestLog: (id: string, runHint?: string) => findLogPath(sanitizeId(id), runHint),
   tailLog: tailFile,
+  sessionPath: (id: string) => sessionPath(sanitizeId(id)),
 }
 
 export const AutomationTool = Tool.define(
@@ -560,6 +644,7 @@ export const AutomationTool = Tool.define(
               definition_path: def.definition_path,
               prompt_path: def.prompt_path,
               script_path: def.script_path,
+              session_path: def.session_path,
               log_dir: def.log_dir ?? logDir(def.id),
               history_path: def.history_path ?? historyPath(def.id),
             },
@@ -630,6 +715,48 @@ export const AutomationTool = Tool.define(
           })
         }
 
+        if (params.action === "status") {
+          const def = yield* Effect.promise(() => readDefinition(id))
+          const status = yield* Effect.promise(() => schedulerStatus(def, ctx.abort))
+          const latestLog = yield* Effect.promise(() => findLogPath(id))
+          const history = yield* Effect.promise(() => readHistory(id))
+          const latestHistory = history.at(-1)
+          const running = status.parsed.status?.toLowerCase() === "running"
+          const lines = [
+            `${def.title} (${def.id})`,
+            `Schedule: ${summarize(def)}`,
+            `Task: ${def.task_name}`,
+            `Scheduler status: ${status.parsed.status ?? "unknown"}`,
+            `Last result: ${status.parsed.last_result ?? "unknown"}`,
+            `Next run: ${status.parsed.next_run_time ?? "unknown"}`,
+            `Automation chat session file: ${def.session_path}`,
+            latestHistory
+              ? `Latest recorded run: ${latestHistory.ts} (${latestHistory.exit === 0 ? "ok" : `exit=${latestHistory.exit ?? "unknown"}`})`
+              : "Latest recorded run: none",
+            latestLog ? `Latest log: ${latestLog}` : `Latest log: none yet (${def.log_dir ?? logDir(id)})`,
+          ]
+          return done({
+            title: `automation status: ${id}`,
+            metadata: {
+              action: "status",
+              id,
+              enabled: def.enabled,
+              running,
+              scheduler: process.platform === "win32" ? "windows_schtasks" : "definition_only",
+              task_name: def.task_name,
+              scheduler_status: status.parsed.status,
+              scheduler_last_result: status.parsed.last_result,
+              scheduler_next_run_time: status.parsed.next_run_time,
+              scheduler_task_to_run: status.parsed.task_to_run,
+              session_path: def.session_path,
+              latest_log_path: latestLog,
+              history_count: history.length,
+              exit_code: status.code,
+            },
+            output: lines.join("\n"),
+          })
+        }
+
         yield* ctx.ask({
           permission: "automation",
           patterns: [id],
@@ -645,6 +772,7 @@ export const AutomationTool = Tool.define(
             await fs.rm(def.prompt_path, { force: true })
             await fs.rm(def.script_path, { force: true })
             await fs.rm(vbsPath(def.script_path), { force: true })
+            await fs.rm(def.session_path, { force: true })
             await fs.rm(def.log_dir ?? logDir(id), { recursive: true, force: true })
             await fs.rm(def.history_path ?? historyPath(id), { force: true })
           })
@@ -666,6 +794,7 @@ export const AutomationTool = Tool.define(
             const scheduled = yield* Effect.promise(() => scheduler("run", def, ctx.abort))
             const failure = schedulerFailure(scheduled)
             if (failure) throw new Error(`automation: failed to run ${id}: ${failure}`)
+            const status = yield* Effect.promise(() => schedulerStatus(def, ctx.abort))
             yield* Effect.promise(async () => {
               await pruneLogs(id).catch(() => undefined)
               await pruneHistory(id).catch(() => undefined)
@@ -679,11 +808,23 @@ export const AutomationTool = Tool.define(
                 installed: true,
                 scheduler: process.platform === "win32" ? "windows_schtasks" : "definition_only",
                 task_name: def.task_name,
+                session_path: def.session_path,
                 log_dir: def.log_dir ?? logDir(id),
                 history_path: def.history_path ?? historyPath(id),
+                running: status.parsed.status?.toLowerCase() === "running",
+                scheduler_status: status.parsed.status,
+                scheduler_last_result: status.parsed.last_result,
+                scheduler_next_run_time: status.parsed.next_run_time,
                 exit_code: scheduled.code,
               },
-              output: `Started scheduled task for ${summarize(def)}. Output streams to ${def.log_dir ?? logDir(id)}; use {"action":"logs","id":"${id}"} after the run to inspect.`,
+              output: [
+                `Started scheduled task for ${summarize(def)}.`,
+                `Scheduler status: ${status.parsed.status ?? "unknown"}`,
+                `Next run: ${status.parsed.next_run_time ?? "unknown"}`,
+                `Automation chat session file: ${def.session_path}`,
+                `Logs: ${def.log_dir ?? logDir(id)}`,
+                `Use Status or Logs in the Automations UI to inspect progress.`,
+              ].join("\n"),
             })
           }
 
@@ -742,6 +883,7 @@ export const AutomationTool = Tool.define(
           definition_path: definitionPath(id),
           prompt_path: promptPath(id),
           script_path: scriptPath(id),
+          session_path: existing?.session_path ?? sessionPath(id),
           log_dir: logDir(id),
           history_path: historyPath(id),
           created_at: existing?.created_at ?? now,
@@ -781,6 +923,7 @@ export const AutomationTool = Tool.define(
             definition_path: def.definition_path,
             prompt_path: def.prompt_path,
             script_path: def.script_path,
+            session_path: def.session_path,
             log_dir: def.log_dir,
             history_path: def.history_path,
             exit_code: scheduled?.code,
@@ -790,6 +933,7 @@ export const AutomationTool = Tool.define(
             `Definition: ${def.definition_path}`,
             `Prompt: ${def.prompt_path}`,
             `Runner: ${def.script_path}`,
+            `Automation chat session file: ${def.session_path}`,
             `Logs: ${def.log_dir} (history: ${def.history_path})`,
             scheduled ? `Scheduled task: ${def.task_name}` : "Scheduled task not installed by request or disabled state.",
           ].join("\n"),
@@ -807,6 +951,7 @@ export const __testing = {
   summarize,
   logDir,
   historyPath,
+  sessionPath,
   readHistory,
   pruneHistory,
   pruneLogs,
@@ -814,4 +959,5 @@ export const __testing = {
   tailFile,
   vbsPath,
   buildVbsLauncher,
+  parseTaskQuery,
 }

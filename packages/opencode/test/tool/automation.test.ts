@@ -41,6 +41,7 @@ describe("tool.automation", () => {
         definition_path: "C:\\state\\daily-repo-check.json",
         prompt_path: "C:\\state\\daily-repo-check.txt",
         script_path: "C:\\state\\daily-repo-check.cmd",
+        session_path: "C:\\state\\sessions\\daily-repo-check.txt",
         created_at: "2026-04-28T00:00:00.000Z",
         updated_at: "2026-04-28T00:00:00.000Z",
       }
@@ -75,6 +76,7 @@ describe("tool.automation", () => {
         definition_path: "C:\\state\\weekly-standup.json",
         prompt_path: "C:\\state\\weekly-standup.txt",
         script_path: "C:\\state\\weekly-standup.cmd",
+        session_path: "C:\\state\\sessions\\weekly-standup.txt",
         log_dir: "C:\\state\\logs\\weekly-standup",
         history_path: "C:\\state\\history\\weekly-standup.jsonl",
         created_at: "2026-04-28T00:00:00.000Z",
@@ -111,6 +113,7 @@ describe("tool.automation", () => {
         definition_path: "C:\\state\\demo.json",
         prompt_path: "C:\\state\\demo.txt",
         script_path: "C:\\state\\demo.cmd",
+        session_path: "C:\\state\\sessions\\demo.txt",
         log_dir: "C:\\state\\logs\\demo",
         history_path: "C:\\state\\history\\demo.jsonl",
         created_at: "2026-04-28T00:00:00.000Z",
@@ -123,8 +126,12 @@ describe("tool.automation", () => {
       expect(script).toContain("Get-Date -Format yyyyMMdd-HHmmss-fff")
       expect(script).toContain('set "LOG=C:\\state\\logs\\demo\\!TS!.log"')
       expect(script).toContain('1>> "!LOG!" 2>&1')
+      expect(script).toContain('set "SESSION_FILE=C:\\state\\sessions\\demo.txt"')
+      expect(script).toContain('OPENCODE_SG_AUTOMATION_SESSION_FILE=!SESSION_FILE!')
+      expect(script).toContain("!SESSION_ARGS!")
       expect(script).toContain('set "LOG_JSON=!LOG:\\=\\\\!"')
       expect(script).toContain('"id":"demo"')
+      expect(script).toContain('"session_id":"!SESSION_ID!"')
       expect(script).toContain('"log":"!LOG_JSON!"')
       expect(script).toContain('>> "!HIST!"')
       expect(script).toContain('mkdir "C:\\state\\logs\\demo"')
@@ -138,6 +145,26 @@ describe("tool.automation", () => {
       const launcher = __testing.buildVbsLauncher("C:\\state\\demo.cmd")
       expect(launcher).toContain("WScript.Shell")
       expect(launcher).toContain('WShell.Run """C:\\state\\demo.cmd""", 0, True')
+    }),
+  )
+
+  it.effect("parses scheduler status from schtasks list output", () =>
+    Effect.sync(() => {
+      const parsed = __testing.parseTaskQuery(
+        [
+          "TaskName:                             \\OpenCode SG\\testing",
+          "Next Run Time:                        29/04/2026 01:49:00",
+          "Status:                               Running",
+          "Last Result:                          267009",
+          "Task To Run:                          wscript.exe \"C:\\Users\\User\\.local\\share\\opencode\\automations\\scripts\\testing.vbs\"",
+          "Scheduled Task State:                 Enabled",
+        ].join("\r\n"),
+      )
+      expect(parsed.status).toBe("Running")
+      expect(parsed.last_result).toBe("267009")
+      expect(parsed.next_run_time).toBe("29/04/2026 01:49:00")
+      expect(parsed.scheduled_task_state).toBe("Enabled")
+      expect(parsed.task_to_run).toContain("testing.vbs")
     }),
   )
 

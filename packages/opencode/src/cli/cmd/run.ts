@@ -1,4 +1,5 @@
 import type { Argv } from "yargs"
+import * as fs from "node:fs/promises"
 import path from "path"
 import { pathToFileURL } from "url"
 import { UI } from "../ui"
@@ -416,6 +417,19 @@ export const RunCommand = cmd({
       }
     }
 
+    async function recordAutomationSession(sessionID: string) {
+      if (process.env.OPENCODE_SG_AUTOMATION_RUN !== "1") return
+      const file = process.env.OPENCODE_SG_AUTOMATION_SESSION_FILE
+      if (!file) return
+      try {
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, sessionID + EOL, "utf8")
+        UI.println(UI.Style.TEXT_DIM + `[automation-session] ${sessionID}` + UI.Style.TEXT_NORMAL)
+      } catch (error) {
+        UI.println(UI.Style.TEXT_DANGER_BOLD + `automation session file failed: ${String(error)}`)
+      }
+    }
+
     async function execute(sdk: OpencodeClient) {
       function tool(part: ToolPart) {
         try {
@@ -641,6 +655,7 @@ export const RunCommand = cmd({
         UI.error("Session not found")
         process.exit(1)
       }
+      await recordAutomationSession(sessionID)
       await share(sdk, sessionID)
 
       loop().catch((e) => {

@@ -50,6 +50,7 @@ import type { WaitTool } from "@/tool/wait"
 import type { HashTool } from "@/tool/hash"
 import type { NotifyTool } from "@/tool/notify"
 import type { OpenTool } from "@/tool/open"
+import type { ClipboardTool } from "@/tool/clipboard"
 import type { AutomationTool } from "@/tool/automation"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
@@ -1588,6 +1589,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "open"}>
           <Open {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "clipboard"}>
+          <ClipboardToolDisplay {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "automation"}>
           <Automation {...toolprops} />
         </Match>
@@ -2038,6 +2042,21 @@ function Notify(props: ToolProps<typeof NotifyTool>) {
       <Show when={delivered() === false} fallback={<>Notify [{urgency()}] {title()}</>}>
         Notify [{urgency()}] {title()} (not delivered)
       </Show>
+    </InlineTool>
+  )
+}
+
+function ClipboardToolDisplay(props: ToolProps<typeof ClipboardTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const action = createMemo(() => props.input.action ?? props.metadata.action ?? "clipboard")
+  const length = createMemo(() => props.metadata.text_length)
+  const hasError = createMemo(() => Boolean(props.metadata.error))
+
+  return (
+    <InlineTool icon="📋" pending="Clipboarding..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      Clipboard {action()}
+      <Show when={typeof length() === "number"}> ({length()} chars)</Show>
+      <Show when={hasError()}> (failed)</Show>
     </InlineTool>
   )
 }

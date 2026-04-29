@@ -16,6 +16,7 @@ import { WaitTool } from "./wait"
 import { HashTool } from "./hash"
 import { NotifyTool } from "./notify"
 import { OpenTool } from "./open"
+import { ClipboardTool } from "./clipboard"
 import { AutomationTool } from "./automation"
 import * as Tool from "./tool"
 import { Config } from "../config"
@@ -124,6 +125,7 @@ export const layer: Layer.Layer<
     const hashtool = yield* HashTool
     const notifytool = yield* NotifyTool
     const opentool = yield* OpenTool
+    const clipboardtool = yield* ClipboardTool
     const automationtool = yield* AutomationTool
     const agent = yield* Agent.Service
 
@@ -218,6 +220,7 @@ export const layer: Layer.Layer<
           hash: Tool.init(hashtool),
           notify: Tool.init(notifytool),
           open: Tool.init(opentool),
+          clipboard: Tool.init(clipboardtool),
           automation: Tool.init(automationtool),
         })
 
@@ -243,6 +246,7 @@ export const layer: Layer.Layer<
             tool.hash,
             tool.notify,
             tool.open,
+            tool.clipboard,
             tool.automation,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),

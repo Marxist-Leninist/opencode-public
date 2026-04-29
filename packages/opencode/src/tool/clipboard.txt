@@ -1,0 +1,21 @@
+Read from or write to the system clipboard.
+
+Use this tool when you need to access text the user has copied (so they don't have to paste it into chat) or when you want to put a result on their clipboard so they can paste it elsewhere.
+
+Parameters:
+- `action` (required): one of `read` or `write`.
+- `text` (optional): the text to copy when action is `write`. Required for `write`.
+
+Behavior:
+- Best-effort: if no clipboard backend is available the tool returns successfully with `metadata.error` set rather than throwing. Do not retry on failure.
+- Reads return the current clipboard content as a string. Writes overwrite the clipboard.
+- Sensitive content (tokens, passwords, etc.) MUST NOT be written here unless the user explicitly asked.
+
+Examples:
+- Read: `{ "action": "read" }`
+- Write: `{ "action": "write", "text": "https://example.com/release-notes" }`
+
+Do NOT use this tool to:
+- Persist arbitrary data — the clipboard is volatile and shared across all apps.
+- Replace returning results in chat — the user reads the chat too.
+- Copy huge strings (>1 MB). Some platforms truncate or fail.
