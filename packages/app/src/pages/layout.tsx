@@ -2261,19 +2261,6 @@ export default function Layout(props: ParentProps) {
                         >
                           Automations
                         </Button>
-                        <Button
-                          size="large"
-                          icon="magnifying-glass"
-                          variant={location.pathname.endsWith("/chat-search") ? "secondary" : "ghost"}
-                          class="w-full"
-                          onClick={() => {
-                            const dir = worktree()
-                            if (!dir) return
-                            navigateWithSidebarReset(`/${base64Encode(dir)}/chat-search`)
-                          }}
-                        >
-                          Search chats
-                        </Button>
                       </div>
                       <div class="flex-1 min-h-0">
                         <LocalWorkspace
