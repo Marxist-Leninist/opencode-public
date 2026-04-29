@@ -1,0 +1,28 @@
+Capture a screenshot of the user's screen and save it to a PNG file.
+
+Use this when the user asks to capture, screenshot, or grab the screen, or when you want to surface the current visual state for debugging.
+
+Parameters:
+- `output_path` (optional): absolute or project-relative path where the PNG will be saved. Default: a timestamped file in the OS temp dir.
+- `region` (optional): one of `full`, `primary`, `active_window`. Default `primary`.
+  - `full`: capture every connected display joined into one image (Windows + macOS).
+  - `primary`: capture the primary display only (default).
+  - `active_window`: capture only the currently focused window (Windows + macOS).
+- `delay_ms` (optional): wait this many milliseconds before capturing (0 to 10000). Useful when the user needs time to bring something into focus.
+
+Behavior:
+- Cross-platform: Windows uses PowerShell + System.Drawing; macOS uses `screencapture`; Linux tries `grim` (Wayland), then `gnome-screenshot`, then `scrot`.
+- Returns metadata.path with the absolute path of the saved PNG and metadata.bytes with file size.
+- The file is intentionally NOT inlined as base64 in the tool output to avoid context bloat. Use the `read` tool with the returned path if you need to look at the image.
+- Best-effort: if no backend is available the tool returns metadata.delivered=false rather than throwing. Do not retry on failure.
+
+Examples:
+- Default primary-display capture: `{}`
+- Specific path: `{ "output_path": "C:/Users/User/Desktop/bug.png" }`
+- Capture all displays: `{ "region": "full" }`
+- Capture the focused window after 2 seconds: `{ "region": "active_window", "delay_ms": 2000 }`
+
+Do NOT use this tool to:
+- Spy on the user. Always call this in service of an explicit visual task.
+- Capture sensitive content (banking, passwords). Stop and ask if you suspect the screen contents are sensitive.
+- Repeatedly poll the screen — once per state change is plenty.

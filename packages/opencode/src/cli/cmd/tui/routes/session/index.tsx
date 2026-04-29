@@ -54,6 +54,7 @@ import type { ClipboardTool } from "@/tool/clipboard"
 import type { AutomationTool } from "@/tool/automation"
 import type { DownloadTool } from "@/tool/download"
 import type { SgDoctorTool } from "@/tool/sg_doctor"
+import type { ScreenshotTool } from "@/tool/screenshot"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -1603,6 +1604,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "sg_doctor"}>
           <SgDoctor {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "screenshot"}>
+          <Screenshot {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -2139,6 +2143,23 @@ function Download(props: ToolProps<typeof DownloadTool>) {
       <Show when={aborted()}> (cancelled)</Show>
       <Show when={matches() === true}> (verified)</Show>
       <Show when={matches() === false}> (sha256 mismatch)</Show>
+    </InlineTool>
+  )
+}
+
+function Screenshot(props: ToolProps<typeof ScreenshotTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const region = createMemo(() => props.input.region ?? props.metadata.region ?? "primary")
+  const filePath = createMemo(() => (props.metadata.path ? path.basename(String(props.metadata.path)) : ""))
+  const bytes = createMemo(() => props.metadata.bytes)
+  const delivered = createMemo(() => props.metadata.delivered)
+
+  return (
+    <InlineTool icon="◉" pending="Capturing..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      Screenshot {String(region())}
+      <Show when={filePath()}> → {filePath()}</Show>
+      <Show when={typeof bytes() === "number"}> ({bytes()} bytes)</Show>
+      <Show when={delivered() === false}> (failed)</Show>
     </InlineTool>
   )
 }

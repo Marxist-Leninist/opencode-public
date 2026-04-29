@@ -4,7 +4,7 @@ import { Config } from "../config"
 import DESCRIPTION from "./sg_doctor.txt"
 import * as Tool from "./tool"
 
-const TARGETS = ["ring", "sg1", "sg2", "scheduler"] as const
+const TARGETS = ["ring", "ring_multimodal", "sg1", "sg2", "scheduler"] as const
 type Target = (typeof TARGETS)[number]
 
 const DEFAULT_RING_BASE = "https://doxx.lat/ring/v1"
@@ -14,7 +14,8 @@ const DEFAULT_TIMEOUT_MS = 8_000
 
 export const Parameters = Schema.Struct({
   targets: Schema.optional(Schema.Array(Schema.Literals(TARGETS))).annotate({
-    description: "Subset of targets to probe. Default is all four.",
+    description:
+      "Subset of targets to probe. Default probes ring, sg1, sg2, scheduler. Pass 'ring_multimodal' explicitly to also test whether Ring 2.5 1T accepts image_url content (the SG proxy currently strips them).",
   }),
   ring_base_url: Schema.optional(Schema.String).annotate({
     description: "Override Ring proxy base URL. Default https://doxx.lat/ring/v1",
@@ -124,6 +125,89 @@ async function probeRing(baseUrl: string, key: string | undefined, timeoutMs: nu
   }
 }
 
+// 1x1 transparent PNG as a base64 data URL — small enough to send through cheaply.
+const TINY_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+async function probeRingMultimodal(
+  baseUrl: string,
+  key: string | undefined,
+  timeoutMs: number,
+): Promise<ProbeResult> {
+  if (!key) {
+    return {
+      target: "ring_multimodal",
+      ok: false,
+      detail: "no API key (set provider.sg-ring.options.apiKey or pass ring_api_key)",
+    }
+  }
+  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`
+  const body = JSON.stringify({
+    model: "Ring-2.5-1T",
+    stream: false,
+    max_tokens: 32,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Reply with exactly: probe-ok" },
+          { type: "image_url", image_url: { url: TINY_PNG_DATA_URL } },
+        ],
+      },
+    ],
+  })
+  const r = await timedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body,
+    },
+    timeoutMs,
+  )
+  if (!r.res) {
+    return {
+      target: "ring_multimodal",
+      ok: false,
+      latency_ms: r.latency_ms,
+      detail: r.error ?? "unreachable",
+    }
+  }
+  let text = ""
+  try {
+    const json: any = await r.res.json()
+    text = String(json?.choices?.[0]?.message?.content ?? "")
+  } catch {}
+  const dropped = /non-text attachment\(s\).*were dropped/i.test(text)
+  // We treat "ok" here as "we got a clear, structured answer about multimodal status".
+  // Either path counts: server confirms drop (text-only) OR server passes through (multimodal).
+  if (dropped) {
+    return {
+      target: "ring_multimodal",
+      ok: true,
+      status: r.res.status,
+      latency_ms: r.latency_ms,
+      detail: "text-only — proxy strips images (confirmed by NOTE in response)",
+    }
+  }
+  if (/probe-ok/i.test(text)) {
+    return {
+      target: "ring_multimodal",
+      ok: true,
+      status: r.res.status,
+      latency_ms: r.latency_ms,
+      detail: "multimodal: image accepted, model returned probe-ok",
+    }
+  }
+  return {
+    target: "ring_multimodal",
+    ok: false,
+    status: r.res.status,
+    latency_ms: r.latency_ms,
+    detail: `inconclusive — first 80 chars: ${text.slice(0, 80).replace(/\n/g, " ")}`,
+  }
+}
+
 async function probeMcp(target: "sg1" | "sg2", url: string, timeoutMs: number): Promise<ProbeResult> {
   // SSE endpoints accept GET and never close. Use HEAD if allowed; if not, do GET with a tiny timeout.
   const head = await timedFetch(url, { method: "HEAD" }, Math.min(2000, timeoutMs))
@@ -207,7 +291,9 @@ export const SgDoctorTool = Tool.define(
       execute: (params: Params, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
           const cfg: any = yield* config.get()
-          const targets: Target[] = (params.targets && params.targets.length > 0 ? params.targets : TARGETS) as Target[]
+          // Default set excludes ring_multimodal (it sends a chat-completion roundtrip and only matters when you're asking about images).
+          const DEFAULT_TARGETS: Target[] = ["ring", "sg1", "sg2", "scheduler"]
+          const targets: Target[] = (params.targets && params.targets.length > 0 ? params.targets : DEFAULT_TARGETS) as Target[]
           const timeoutMs = params.timeout_ms ?? DEFAULT_TIMEOUT_MS
 
           const ringBaseUrl =
@@ -236,6 +322,8 @@ export const SgDoctorTool = Tool.define(
             const tasks: Promise<ProbeResult>[] = []
             const include = new Set(targets)
             if (include.has("ring")) tasks.push(probeRing(ringBaseUrl, ringKey, timeoutMs))
+            if (include.has("ring_multimodal"))
+              tasks.push(probeRingMultimodal(ringBaseUrl, ringKey, timeoutMs))
             if (include.has("sg1")) tasks.push(probeMcp("sg1", sg1Url, timeoutMs))
             if (include.has("sg2")) tasks.push(probeMcp("sg2", sg2Url, timeoutMs))
             if (include.has("scheduler")) tasks.push(probeScheduler(cfg))
@@ -274,4 +362,4 @@ export const SgDoctorTool = Tool.define(
   }),
 )
 
-export const __testing = { probeRing, probeMcp, probeScheduler }
+export const __testing = { probeRing, probeRingMultimodal, probeMcp, probeScheduler }

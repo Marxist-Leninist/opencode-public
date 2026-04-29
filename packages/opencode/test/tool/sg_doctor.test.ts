@@ -5,7 +5,7 @@ import path from "path"
 import { writeFile, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 
-const { probeRing, probeMcp, probeScheduler } = __testing
+const { probeRing, probeRingMultimodal, probeMcp, probeScheduler } = __testing
 
 describe("sg_doctor probes", () => {
   let server: Server
@@ -26,6 +26,37 @@ describe("sg_doctor probes", () => {
       if (req.url === "/v1/models-noring" && req.headers.authorization === "Bearer goodkey") {
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify({ object: "list", data: [{ id: "OtherModel" }] }))
+        return
+      }
+      if (req.url === "/v1-textonly/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content:
+                    "probe-ok [NOTE: 1 non-text attachment(s) (images/files/audio) were dropped because the Ring text-only model …]",
+                },
+              },
+            ],
+          }),
+        )
+        return
+      }
+      if (req.url === "/v1-multimodal/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "probe-ok" } }],
+          }),
+        )
+        return
+      }
+      if (req.url === "/v1-weird/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "what?" } }] }))
         return
       }
       if (req.url === "/mcp/sse") {
@@ -118,5 +149,32 @@ describe("sg_doctor probes", () => {
     const result = await probeScheduler({})
     expect(result.ok).toBe(false)
     expect(result.detail).toContain("no sg-scheduler")
+  })
+
+  test("probeRingMultimodal: text-only proxy is reported as ok with text-only detail", async () => {
+    const result = await probeRingMultimodal(`${baseUrl}/v1-textonly`, "goodkey", 6000)
+    expect(result.target).toBe("ring_multimodal")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/text-only/i)
+  })
+
+  test("probeRingMultimodal: multimodal-capable proxy is reported as ok with multimodal detail", async () => {
+    const result = await probeRingMultimodal(`${baseUrl}/v1-multimodal`, "goodkey", 6000)
+    expect(result.target).toBe("ring_multimodal")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/multimodal/i)
+  })
+
+  test("probeRingMultimodal: inconclusive response is reported not-ok", async () => {
+    const result = await probeRingMultimodal(`${baseUrl}/v1-weird`, "goodkey", 6000)
+    expect(result.target).toBe("ring_multimodal")
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/inconclusive/i)
+  })
+
+  test("probeRingMultimodal: missing key returns clear error", async () => {
+    const result = await probeRingMultimodal(`${baseUrl}/v1-textonly`, undefined, 4000)
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/no API key/)
   })
 })
