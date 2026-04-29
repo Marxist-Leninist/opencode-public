@@ -1,0 +1,51 @@
+Evaluate a mathematical expression safely (no `eval`, no shell).
+
+Use this when you need to compute a number from a formula — totals, conversions, percentages, statistical reductions over a list — without spawning a Python or Node process. Operators bind by standard precedence, and named variables can be passed in `vars`.
+
+The expression is parsed by a small built-in parser. There is no access to JS globals, no string operations, no I/O.
+
+Parameters:
+- `action` (required): one of:
+  - `eval` — evaluate `expression` and return a single number.
+  - `reduce` — apply a reducer (`sum`, `mean`, `median`, `min`, `max`, `product`, `stddev`, `variance`, `count`) to `values` (an array of numbers).
+- `expression` (required for `eval`): math text. Examples below.
+- `vars` (optional, for `eval`): map of variable name → number. Names match `[A-Za-z_][A-Za-z_0-9]*`.
+- `values` (required for `reduce`): array of numbers.
+- `reducer` (required for `reduce`): one of `sum`, `mean`, `median`, `min`, `max`, `product`, `stddev`, `variance`, `count`.
+- `precision` (optional): integer 0-15. If set, rounds the final result to N decimal places.
+
+Operators:
+- `+ - * /` standard arithmetic.
+- `%` remainder (modulo).
+- `^` or `**` power (`2^10` and `2**10` both work).
+- Unary `-x` and `+x`.
+- Parentheses for grouping.
+
+Constants:
+- `pi`, `e`, `tau` (= 2π), `inf`, `nan`.
+
+Functions (all map to `Math.*` or are obvious):
+- `abs`, `sign`, `round`, `floor`, `ceil`, `trunc`.
+- `sqrt`, `cbrt`, `exp`, `log` (natural), `log2`, `log10`.
+- `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y,x)`.
+- `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
+- `min(a, b, ...)`, `max(a, b, ...)`, `pow(a, b)`, `hypot(a, b, ...)`.
+- `clamp(x, lo, hi)`, `gcd(a, b)`, `lcm(a, b)`, `factorial(n)` (n ≤ 170).
+
+Examples:
+- `{ "action": "eval", "expression": "2 + 3 * 4" }` → 14
+- `{ "action": "eval", "expression": "sin(pi/4)^2 + cos(pi/4)^2" }` → 1
+- `{ "action": "eval", "expression": "(price * (1 + tax)) - discount", "vars": { "price": 100, "tax": 0.2, "discount": 5 } }` → 115
+- `{ "action": "eval", "expression": "log10(1024)", "precision": 4 }` → 3.0103
+- `{ "action": "reduce", "reducer": "mean", "values": [1, 2, 3, 4] }` → 2.5
+- `{ "action": "reduce", "reducer": "stddev", "values": [2, 4, 4, 4, 5, 5, 7, 9] }` → 2
+
+Behavior:
+- Returns the result in `metadata.value` and (for `eval`) the parsed expression and variable map echoed in `metadata.expression` / `metadata.vars`.
+- Returns `NaN` or `±Infinity` when the math itself is undefined (e.g. `1/0`); does not throw.
+- Throws on syntax errors, unknown identifiers, or wrong arity.
+
+Do NOT use this tool to:
+- Run general code — there's no `eval` here. Use `bash` if you genuinely need a script.
+- Format numbers — use `text` or string templating.
+- Convert between bases — use `encode` or `regex`.

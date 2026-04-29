@@ -1,0 +1,47 @@
+Parse, build, and modify URLs without spawning a shell.
+
+Use this when you need to:
+- Pull a query param out of a long URL.
+- Replace, add, or remove query params and re-emit a clean URL.
+- Encode/decode just one URL component (host, path, query value).
+- Normalize a URL (lowercased host, sorted query params, trimmed default port).
+- Resolve a relative reference against a base URL (RFC 3986 join).
+- Build a URL from parts.
+
+Pure transform; no network, no filesystem.
+
+Parameters:
+- `action` (required): one of:
+  - `parse` — break a URL into protocol/host/port/path/query/fragment/etc.
+  - `build` — assemble a URL from a `parts` object (`protocol`, `host`, `port`, `path`, `query`, `fragment`, `username`, `password`).
+  - `set_query` — set query params from `params` object. Existing keys are replaced; pass an empty string `""` to set an empty value, pass `null` (or use `remove_query`) to drop a key.
+  - `remove_query` — remove the keys listed in `keys` from the query string.
+  - `get_query` — return the value(s) of the keys listed in `keys` as a `params` map.
+  - `normalize` — lowercase scheme/host, drop default ports (`:80` for http, `:443` for https), sort query params alphabetically, drop trailing `?`/`#` if empty.
+  - `join` — resolve a relative reference (`value`) against a base (`base`).
+  - `encode` — `encodeURIComponent(value)`.
+  - `decode` — `decodeURIComponent(value)`.
+- `value` (required for everything except `build`): the URL or string to operate on.
+- `base` (required for `join`): the absolute base URL.
+- `parts` (required for `build`): object describing protocol/host/etc.
+- `params` (required for `set_query`): object whose values are strings, numbers, or `null` (drop).
+- `keys` (required for `remove_query` and `get_query`): array of query-param names.
+
+Behavior:
+- Always returns the resulting URL (or value/value list) in `metadata.url` (or `metadata.value` / `metadata.values`).
+- For `parse`, populates `metadata.parts` with `protocol`, `host`, `hostname`, `port`, `pathname`, `search`, `searchParams` (object), `hash`, `username`, `password`, `origin`.
+- Same-key duplicates: `searchParams` is an object so a repeated key collapses to the last value. Use `get_query` if you need the explicit list — it returns an array per key.
+
+Examples:
+- `{ "action": "parse", "value": "https://api.example.com:443/v1/users?role=admin&active=1#top" }`
+- `{ "action": "set_query", "value": "https://example.com/?a=1", "params": { "b": "2", "a": null } }`
+- `{ "action": "remove_query", "value": "https://example.com/?a=1&b=2", "keys": ["a"] }`
+- `{ "action": "get_query", "value": "https://example.com/?a=1&b=2&a=3", "keys": ["a"] }`
+- `{ "action": "normalize", "value": "HTTPS://EXAMPLE.com:443/Path/?b=2&a=1" }`
+- `{ "action": "join", "base": "https://example.com/foo/bar", "value": "../baz" }`
+- `{ "action": "build", "parts": { "protocol": "https", "host": "example.com", "path": "/x", "query": { "q": "hi" } } }`
+
+Do NOT use this tool to:
+- Make HTTP requests — use `http`.
+- Validate that a URL is reachable — use `net_check` or `http`.
+- Parse non-URL strings — use `regex` or `text`.

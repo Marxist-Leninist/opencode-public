@@ -50,6 +50,9 @@ const AVAILABLE_TOOLS = [
   "yaml",
   "diff",
   "text",
+  "url",
+  "math",
+  "random",
 ]
 
 const AgentCreateCommand = cmd({

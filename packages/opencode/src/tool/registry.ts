@@ -37,6 +37,9 @@ import { CsvTool } from "./csv"
 import { YamlTool } from "./yaml"
 import { DiffTool } from "./diff"
 import { TextTool } from "./text"
+import { UrlTool } from "./url"
+import { MathTool } from "./math"
+import { RandomTool } from "./random"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -165,6 +168,9 @@ export const layer: Layer.Layer<
     const yamltool = yield* YamlTool
     const difftool = yield* DiffTool
     const texttool = yield* TextTool
+    const urltool = yield* UrlTool
+    const mathtool = yield* MathTool
+    const randomtool = yield* RandomTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -279,6 +285,9 @@ export const layer: Layer.Layer<
           yaml: Tool.init(yamltool),
           diff: Tool.init(difftool),
           text: Tool.init(texttool),
+          url: Tool.init(urltool),
+          math: Tool.init(mathtool),
+          random: Tool.init(randomtool),
         })
 
         return {
@@ -324,6 +333,9 @@ export const layer: Layer.Layer<
             tool.yaml,
             tool.diff,
             tool.text,
+            tool.url,
+            tool.math,
+            tool.random,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

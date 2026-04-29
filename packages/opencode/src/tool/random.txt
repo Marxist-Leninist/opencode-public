@@ -1,0 +1,44 @@
+Generate cryptographically-secure random values: integers, floats, bytes, strings, passwords, or picks from a list.
+
+Uses Node's `crypto.randomBytes` / `crypto.randomInt` under the hood — suitable for tokens, salts, and short-lived passwords. Not seedable; every call is fresh.
+
+Parameters:
+- `action` (required): one of:
+  - `int` — random integer in [`min`, `max`] inclusive. Default `[0, 100]`. Bounds must be safe integers and `max >= min`.
+  - `float` — random number in [`min`, `max`). Default `[0, 1)`.
+  - `bytes` — random bytes returned as `output_encoding` (`hex` default, `base64`, `base64url`).
+  - `string` — random string of length `length` over `alphabet` (or a named preset: `alphanumeric`, `alpha`, `numeric`, `lower`, `upper`, `hex`, `urlsafe`).
+  - `password` — random string with at least one of: lowercase, uppercase, digits, symbols (toggle with `lowercase`, `uppercase`, `digits`, `symbols`, all default true). Avoids ambiguous chars by default (`avoid_ambiguous=true`).
+  - `pick` — choose `count` items from `choices` (without replacement when `unique=true`, default true). With `weights` (same length as `choices`) does weighted sampling with replacement.
+  - `shuffle` — shuffle `choices` in place (Fisher–Yates) and return the new order.
+  - `bool` — random boolean (true/false).
+  - `uuid` — RFC 4122 v4 (alias for `uuid` tool's `v4`; included for ergonomics).
+- `count` (optional): number of items to generate (default 1; `int`/`float`/`bytes`/`string`/`password`/`bool` accept up to 10000; `pick` up to choices.length).
+- `length` (optional): length for `string`/`password`/`bytes`. `bytes` default 32; `string` default 16; `password` default 16.
+- `min`, `max` (optional): bounds for `int` and `float`.
+- `alphabet` (optional): string for `string`. Either an explicit set of characters or a preset name.
+- `lowercase`, `uppercase`, `digits`, `symbols` (optional): toggles for `password`. At least one must remain true.
+- `avoid_ambiguous` (optional): for `password`, drop confusable chars (`0/O`, `1/l/I`, etc.). Default true.
+- `output_encoding` (optional): `hex` (default for `bytes`), `base64`, `base64url`.
+- `choices` (required for `pick`/`shuffle`): array of values.
+- `weights` (optional): array of non-negative numbers, same length as `choices`. Forces weighted sampling with replacement.
+- `unique` (optional, for `pick`): if true (default) pick without replacement; if false, with replacement.
+
+Examples:
+- `{ "action": "int", "min": 1, "max": 6, "count": 5 }` — five dice rolls
+- `{ "action": "bytes", "length": 16, "output_encoding": "hex" }` — 32-char hex
+- `{ "action": "string", "length": 12, "alphabet": "urlsafe" }`
+- `{ "action": "password", "length": 24, "symbols": false }`
+- `{ "action": "pick", "choices": ["alice", "bob", "carol"], "count": 1 }`
+- `{ "action": "pick", "choices": ["a", "b", "c"], "count": 100, "unique": false, "weights": [1, 1, 8] }`
+- `{ "action": "shuffle", "choices": [1, 2, 3, 4, 5] }`
+
+Behavior:
+- Returns the value(s) in `metadata.values` (always an array, even for `count=1`) and a flat `metadata.value` for the single-result case.
+- Errors if `pick` requests more unique items than `choices` provides.
+- `password` retries until each requested class has at least one character (capped at 32 retries, then errors so the caller knows the alphabet is impossible).
+
+Do NOT use this tool to:
+- Seed or reproduce a sequence — use a deterministic generator elsewhere.
+- Generate UUIDs in bulk with version control — use the `uuid` tool.
+- Hash anything — use `hash`.
