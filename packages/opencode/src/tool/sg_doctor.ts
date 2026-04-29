@@ -142,10 +142,13 @@ async function probeRingMultimodal(
     }
   }
   const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`
+  // max_tokens needs to be high enough that, if the proxy injects a "non-text attachment(s) … were dropped"
+  // note into the prompt, the model has room to echo enough of that note for our regex to match.
+  // Empirically the dropped-note prefix is ~30 tokens; 96 gives headroom.
   const body = JSON.stringify({
     model: "Ring-2.5-1T",
     stream: false,
-    max_tokens: 32,
+    max_tokens: 96,
     messages: [
       {
         role: "user",
@@ -178,7 +181,10 @@ async function probeRingMultimodal(
     const json: any = await r.res.json()
     text = String(json?.choices?.[0]?.message?.content ?? "")
   } catch {}
-  const dropped = /non-text attachment\(s\).*were dropped/i.test(text)
+  // The proxy injects something like "[NOTE: 1 non-text attachment(s) (images/files/audio) were dropped because …]"
+  // into the user prompt before the model sees it. The model echoes enough of that for either substring to be
+  // unambiguous on its own. We accept either to survive aggressive max_tokens truncation.
+  const dropped = /non-text attachment\(s\)/i.test(text) || /were dropped/i.test(text)
   // We treat "ok" here as "we got a clear, structured answer about multimodal status".
   // Either path counts: server confirms drop (text-only) OR server passes through (multimodal).
   if (dropped) {

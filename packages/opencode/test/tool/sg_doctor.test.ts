@@ -45,6 +45,23 @@ describe("sg_doctor probes", () => {
         )
         return
       }
+      // Same as v1-textonly but with the response truncated mid-note before "were dropped" — happens at low max_tokens.
+      if (req.url === "/v1-textonly-truncated/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: 'Reply with exactly: probe-ok [NOTE: 1 non-text attachment(s) (images/files/a',
+                },
+              },
+            ],
+          }),
+        )
+        return
+      }
       if (req.url === "/v1-multimodal/chat/completions" && req.method === "POST") {
         res.writeHead(200, { "content-type": "application/json" })
         res.end(
@@ -153,6 +170,15 @@ describe("sg_doctor probes", () => {
 
   test("probeRingMultimodal: text-only proxy is reported as ok with text-only detail", async () => {
     const result = await probeRingMultimodal(`${baseUrl}/v1-textonly`, "goodkey", 6000)
+    expect(result.target).toBe("ring_multimodal")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/text-only/i)
+  })
+
+  test("probeRingMultimodal: truncated drop note is still detected as text-only", async () => {
+    // When the response is cut off mid-sentence (low max_tokens) before "were dropped",
+    // the "non-text attachment(s)" substring alone must trigger the text-only verdict.
+    const result = await probeRingMultimodal(`${baseUrl}/v1-textonly-truncated`, "goodkey", 6000)
     expect(result.target).toBe("ring_multimodal")
     expect(result.ok).toBe(true)
     expect(result.detail).toMatch(/text-only/i)
