@@ -4,7 +4,7 @@ import { Config } from "../config"
 import DESCRIPTION from "./sg_doctor.txt"
 import * as Tool from "./tool"
 
-const TARGETS = ["ring", "ring_multimodal", "sg1", "sg2", "scheduler", "deepseek", "openrouter"] as const
+const TARGETS = ["ring", "ring_text", "ring_multimodal", "sg1", "sg2", "scheduler", "deepseek", "openrouter"] as const
 type Target = (typeof TARGETS)[number]
 
 const DEFAULT_RING_BASE = "https://doxx.lat/ring/v1"
@@ -17,7 +17,7 @@ const DEFAULT_TIMEOUT_MS = 8_000
 export const Parameters = Schema.Struct({
   targets: Schema.optional(Schema.Array(Schema.Literals(TARGETS))).annotate({
     description:
-      "Subset of targets to probe. Default probes ring, sg1, sg2, scheduler. Pass 'ring_multimodal' explicitly to also test whether Ring 2.5 1T accepts image_url content (the SG proxy currently strips them).",
+      "Subset of targets to probe. Default probes ring, sg1, sg2, scheduler. Pass 'ring_text' to additionally exercise a real text-only chat completion against Ring (proves the proxy can complete, not just list models). Pass 'ring_multimodal' explicitly to also test whether Ring 2.5 1T accepts image_url content (the SG proxy currently strips them).",
   }),
   ring_base_url: Schema.optional(Schema.String).annotate({
     description: "Override Ring proxy base URL. Default https://doxx.lat/ring/v1",
@@ -138,6 +138,69 @@ async function probeRing(baseUrl: string, key: string | undefined, timeoutMs: nu
     status: r.res.status,
     latency_ms: r.latency_ms,
     detail: listed ? "Ring-2.5-1T listed" : "models endpoint reachable but Ring-2.5-1T not in list",
+  }
+}
+
+async function probeRingText(
+  baseUrl: string,
+  key: string | undefined,
+  timeoutMs: number,
+): Promise<ProbeResult> {
+  if (!key) {
+    return {
+      target: "ring_text",
+      ok: false,
+      detail: "no API key (set provider.sg-ring.options.apiKey or pass ring_api_key)",
+    }
+  }
+  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`
+  // We ask for an exact short string. The model may pad with reasoning_content first; we accept either field.
+  const body = JSON.stringify({
+    model: "Ring-2.5-1T",
+    stream: false,
+    max_tokens: 32,
+    messages: [{ role: "user", content: "Reply with exactly the three letters: OKZ" }],
+  })
+  const r = await timedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body,
+    },
+    timeoutMs,
+  )
+  if (!r.res) {
+    return { target: "ring_text", ok: false, latency_ms: r.latency_ms, detail: r.error ?? "unreachable" }
+  }
+  if (!r.res.ok) {
+    let bodyText = ""
+    try {
+      bodyText = (await r.res.text()).slice(0, 200)
+    } catch {}
+    return {
+      target: "ring_text",
+      ok: false,
+      status: r.res.status,
+      latency_ms: r.latency_ms,
+      detail: `HTTP ${r.res.status} ${r.res.statusText} ${bodyText}`.trim(),
+    }
+  }
+  let text = ""
+  try {
+    const json: any = await r.res.json()
+    const msg = json?.choices?.[0]?.message ?? {}
+    text = [msg.content, msg.reasoning_content].filter((s) => typeof s === "string").join("\n")
+  } catch {}
+  const matched = /OKZ/.test(text)
+  return {
+    target: "ring_text",
+    ok: matched,
+    status: r.res.status,
+    latency_ms: r.latency_ms,
+    detail: matched
+      ? "text completion round-tripped (echoed OKZ)"
+      : `text completion returned but did not echo OKZ — first 80 chars: ${text.slice(0, 80).replace(/\n/g, " ")}`,
   }
 }
 
@@ -420,6 +483,8 @@ export const SgDoctorTool = Tool.define(
             const tasks: Promise<ProbeResult>[] = []
             const include = new Set(targets)
             if (include.has("ring")) tasks.push(probeRing(ringBaseUrl, ringKey, timeoutMs))
+            if (include.has("ring_text"))
+              tasks.push(probeRingText(ringBaseUrl, ringKey, timeoutMs))
             if (include.has("ring_multimodal"))
               tasks.push(probeRingMultimodal(ringBaseUrl, ringKey, timeoutMs))
             if (include.has("sg1")) tasks.push(probeMcp("sg1", sg1Url, timeoutMs))
@@ -468,6 +533,7 @@ export const SgDoctorTool = Tool.define(
 
 export const __testing = {
   probeRing,
+  probeRingText,
   probeRingMultimodal,
   probeMcp,
   probeScheduler,

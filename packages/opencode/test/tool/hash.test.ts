@@ -66,4 +66,49 @@ describe("tool.hash", () => {
       }),
     ),
   )
+
+  it.live("hashes a remote URL via streaming fetch", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const server = Bun.serve({ port: 0, fetch: () => new Response("hello", { status: 200 }) })
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            await server.stop(true)
+          }),
+        )
+        const url = `http://127.0.0.1:${server.port}/payload`
+
+        const toolInfo = yield* HashTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            url,
+            expected: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.source).toBe("url")
+        expect(result.metadata.url).toBe(url)
+        expect(result.metadata.url_status).toBe(200)
+        expect(result.metadata.size_bytes).toBe(5)
+        expect(result.metadata.matches).toBe(true)
+      }),
+    ),
+  )
+
+  it.live("rejects when both filePath and url are passed", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const file = path.join(dir, "x.txt")
+        yield* Effect.promise(() => Bun.write(file, "x"))
+        const toolInfo = yield* HashTool
+        const tool = yield* toolInfo.init()
+        const exit = yield* Effect.exit(
+          tool.execute({ filePath: file, url: "https://example.com/x" }, baseCtx),
+        )
+        expect(exit._tag).toBe("Failure")
+      }),
+    ),
+  )
 })

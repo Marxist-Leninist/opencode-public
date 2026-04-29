@@ -308,4 +308,62 @@ describe("tool.wait", () => {
       }),
     ),
   )
+
+  it.live("returns early when until_port becomes reachable", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const server = Bun.serve({ port: 0, fetch: () => new Response("hi", { status: 200 }) })
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            await server.stop(true)
+          }),
+        )
+
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 5,
+            reason: "wait for tcp port",
+            until_port: server.port,
+            until_port_host: "127.0.0.1",
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_port")
+        expect(result.metadata.port_open).toBe(true)
+        expect(result.metadata.port).toBe(server.port)
+        expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(2)
+      }),
+    ),
+  )
+
+  it.live("times out when until_port never opens", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        // Pick a high port nothing should be listening on. We avoid binding so
+        // it stays closed throughout the test.
+        const closedPort = 1
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 1,
+            reason: "expect closed port",
+            until_port: closedPort,
+            until_port_host: "127.0.0.1",
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_port")
+        expect(result.metadata.port_open).toBeFalsy()
+        expect(result.metadata.timed_out).toBe(true)
+        expect(typeof result.metadata.port_last_error).toBe("string")
+      }),
+    ),
+  )
 })

@@ -5,7 +5,7 @@ import path from "path"
 import { writeFile, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 
-const { probeRing, probeRingMultimodal, probeMcp, probeScheduler, probeOpenAiCompatibleModels } = __testing
+const { probeRing, probeRingText, probeRingMultimodal, probeMcp, probeScheduler, probeOpenAiCompatibleModels } = __testing
 
 describe("sg_doctor probes", () => {
   let server: Server
@@ -119,6 +119,32 @@ describe("sg_doctor probes", () => {
         res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "what?" } }] }))
         return
       }
+      // ring_text: completion echoes the OKZ sentinel.
+      if (req.url === "/v1-text-ok/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "OKZ" } }],
+          }),
+        )
+        return
+      }
+      // ring_text: completion runs but doesn't echo the sentinel.
+      if (req.url === "/v1-text-bad/chat/completions" && req.method === "POST") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "I cannot do that." } }],
+          }),
+        )
+        return
+      }
+      // ring_text: completion route is dead even though /models works (proxy half-up).
+      if (req.url === "/v1-text-503/chat/completions" && req.method === "POST") {
+        res.writeHead(503, { "content-type": "text/plain" })
+        res.end("upstream unavailable")
+        return
+      }
       if (req.url === "/mcp/sse") {
         if (req.method === "HEAD") {
           res.writeHead(200, { "content-type": "text/event-stream" })
@@ -167,6 +193,34 @@ describe("sg_doctor probes", () => {
   test("probeRing flags missing model in list", async () => {
     const result = await probeRing(`${baseUrl}/v1-noring`, "goodkey", 4000)
     expect(result.ok).toBe(false)
+  })
+
+  test("probeRingText reports OK when sentinel is echoed", async () => {
+    const result = await probeRingText(`${baseUrl}/v1-text-ok`, "goodkey", 4000)
+    expect(result.target).toBe("ring_text")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toContain("OKZ")
+  })
+
+  test("probeRingText flags response that does not echo sentinel", async () => {
+    const result = await probeRingText(`${baseUrl}/v1-text-bad`, "goodkey", 4000)
+    expect(result.target).toBe("ring_text")
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(200)
+  })
+
+  test("probeRingText flags 5xx as not-ok with status code", async () => {
+    const result = await probeRingText(`${baseUrl}/v1-text-503`, "goodkey", 4000)
+    expect(result.target).toBe("ring_text")
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(503)
+  })
+
+  test("probeRingText reports missing API key", async () => {
+    const result = await probeRingText(`${baseUrl}/v1-text-ok`, undefined, 4000)
+    expect(result.target).toBe("ring_text")
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain("no API key")
   })
 
   test("probeMcp detects HEAD-reachable MCP endpoint", async () => {

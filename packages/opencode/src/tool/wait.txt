@@ -12,6 +12,8 @@ Modes (mutually exclusive after `seconds`/`reason`):
 
 5. **Wait until pattern in file** - pass `seconds`, `reason`, `until_text` (file path), and `until_text_pattern` (regex string, no surrounding slashes). The tool tails the file and returns as soon as the pattern matches. Optionally pass `text_pattern_flags` (default `m`) and `text_tail_bytes` (default 32768). Pairs well with backgrounded build/test jobs that write progress to a log file - use a pattern like `BUILD SUCCESSFUL` or `\\d+ passed`.
 
+6. **Wait until TCP port open** - pass `seconds`, `reason`, and `until_port` (1-65535), optionally `until_port_host` (default `127.0.0.1`). The tool tries to open a TCP connection on each poll and returns as soon as the connection is accepted. Use this when you only need to know that a process started listening (dev server, database, electron debug port) without paying for an HTTP roundtrip or worrying about the server's exact response shape.
+
 Always provide a short `reason` string. It is shown to the user in the UI so they can see why the agent is paused.
 
 Optional controls (work in every mode):
@@ -26,6 +28,7 @@ Live progress in the UI:
 - `until_url`: title shows the most recent status code and seconds left.
 - `until_pid_exit`: title shows the pid and seconds left.
 - `until_text`: title shows the pattern and seconds left.
+- `until_port`: title shows host:port and the most recent connection error code (ECONNREFUSED, etc.) plus seconds left.
 - `fixed`: title counts down each second.
 
 This tool **blocks the current turn**. If you instead want to schedule a *new* opencode session to fire later (fire-and-forget, non-blocking), use the `sg-scheduler` MCP tools (`schedule_create`, `schedule_list`, etc.) - those create a separate scheduled invocation that runs at a future time without holding the current chat open.
@@ -36,6 +39,7 @@ Limits:
 - `stable_ms` is limited to [0, 600000].
 - `until_url_status` is a single HTTP status code in [100, 599].
 - `until_pid_exit` is a positive integer process id.
+- `until_port` is a TCP port in [1, 65535]; `until_port_host` defaults to `127.0.0.1`.
 
 Example uses:
 - Slow download: `{ "seconds": 900, "reason": "NVIDIA driver download (~12 min)", "until_file": "C:\\Users\\me\\Downloads\\driver.exe", "min_size_bytes": 700000000, "poll_interval_ms": 1000, "stable_ms": 3000 }`
@@ -46,5 +50,7 @@ Example uses:
 - External cancel sentinel: `{ "seconds": 600, "reason": "wait for backup unless cancel sentinel appears", "cancel_if_file": ".opencode-cancel-wait" }`
 - Pattern in log: `{ "seconds": 600, "reason": "wait for build to succeed", "until_text": "build.log", "until_text_pattern": "BUILD SUCCESSFUL", "poll_interval_ms": 1000 }`
 - Test runner: `{ "seconds": 300, "reason": "tests done", "until_text": "test.log", "until_text_pattern": "(\\\\d+ pass|\\\\d+ fail)", "text_pattern_flags": "im" }`
+- Dev server TCP port: `{ "seconds": 60, "reason": "wait for vite to listen", "until_port": 5173, "poll_interval_ms": 250 }`
+- Postgres warmup: `{ "seconds": 30, "reason": "wait for db", "until_port": 5432, "until_port_host": "127.0.0.1" }`
 
 Do NOT use this tool to artificially slow down responses, pad time, or wait on something you could check directly with `read`/`glob`/`grep`. Use it only when there is a genuine asynchronous event you need to wait on.

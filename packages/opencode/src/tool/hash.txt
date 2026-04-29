@@ -1,9 +1,10 @@
-Compute a cryptographic hash of a local file, optionally verifying against an expected digest.
+Compute a cryptographic hash of a local file or remote URL, optionally verifying against an expected digest.
 
-Use this when you need to confirm a downloaded file matches a published digest, compare two files for byte-identity, or record a digest for later verification. Pairs naturally with the `wait` tool: wait for a download to finish, then hash to confirm integrity before running the file.
+Use this when you need to confirm a downloaded file matches a published digest, compare two files for byte-identity, record a digest for later verification, or check a remote artifact's checksum without writing it to disk. Pairs naturally with the `wait` tool: wait for a download to finish, then hash to confirm integrity before running the file.
 
 Parameters:
-- `filePath` (required): path to the file to hash. Absolute paths preferred. Relative paths resolve from the current project directory.
+- `filePath` (optional): path to the file to hash. Absolute paths preferred. Relative paths resolve from the current project directory. Mutually exclusive with `url`; pass exactly one.
+- `url` (optional): http(s) URL to stream-hash without writing to disk. Useful for verifying a published artifact against a known checksum from a release page before deciding to download. Body is streamed so memory stays bounded; aborts cancel the request.
 - `algorithm` (optional): one of `sha256` (default), `sha512`, `sha1`, `md5`. Use sha256 unless a vendor specifically publishes a different digest.
 - `expected` (optional): hex digest to verify against. Case-insensitive, non-hex characters are stripped (so you can paste with colons/spaces from a checksum manifest). If provided, the tool's metadata will set `matches` to true/false.
 
@@ -17,6 +18,7 @@ Examples:
 - Verify a downloaded installer: `{ "filePath": "C:\\Users\\me\\Downloads\\driver.exe", "algorithm": "sha256", "expected": "9af3...:b21" }`
 - Just compute a digest: `{ "filePath": "./build/output.tar.gz" }`
 - Compare two files (call twice and compare digests): `{ "filePath": "/tmp/a" }` then `{ "filePath": "/tmp/b" }`
+- Verify a remote artifact without saving it: `{ "url": "https://example.com/release-1.2.3.tar.gz", "expected": "9af3...:b21" }`
 
 Do NOT use this tool to:
 - Hash strings or in-memory data. That's not what it does. Hash a file on disk.

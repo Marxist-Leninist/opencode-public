@@ -1,4 +1,5 @@
 import { open as fsOpen } from "node:fs/promises"
+import { createConnection } from "node:net"
 import path from "path"
 import { Duration, Effect, Schema } from "effect"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -68,6 +69,15 @@ export const Parameters = Schema.Struct({
     description:
       "Optional process id. If provided, return early once the process is no longer running. Useful for waiting on a backgrounded shell command to finish.",
   }),
+  until_port: Schema.optional(
+    Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(1)).check(Schema.isLessThanOrEqualTo(65_535)),
+  ).annotate({
+    description:
+      "Optional TCP port (1-65535). If provided, return early once a TCP connection to until_port_host:until_port can be established. Use this to wait for a dev server, database, or any TCP service to start accepting connections without doing an HTTP roundtrip.",
+  }),
+  until_port_host: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255))).annotate({
+    description: "Optional hostname or IP for until_port. Defaults to '127.0.0.1' (localhost).",
+  }),
   until_text: Schema.optional(Schema.String).annotate({
     description:
       "Optional file path to tail. If provided alongside until_text_pattern, the wait returns as soon as that pattern matches the tail of the file. Pairs well with bash backgrounded jobs that write to a log file.",
@@ -91,7 +101,7 @@ export const Parameters = Schema.Struct({
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit" | "until_text"
+type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit" | "until_text" | "until_port"
 
 type Metadata = {
   mode: WaitMode
@@ -116,6 +126,10 @@ type Metadata = {
   expected_status?: number
   pid?: number
   exited?: boolean
+  port?: number
+  port_host?: string
+  port_open?: boolean
+  port_last_error?: string
   pattern?: string
   pattern_flags?: string
   text_tail_bytes?: number
@@ -203,6 +217,36 @@ async function probeUrl(url: string, signal: AbortSignal, timeoutMs: number) {
     clearTimeout(timer)
     signal.removeEventListener("abort", onAbort)
   }
+}
+
+async function probeTcpPort(
+  host: string,
+  port: number,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<{ open: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const sock = createConnection({ host, port })
+    const finish = (result: { open: boolean; error?: string }) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      try {
+        sock.destroy()
+      } catch {
+        /* noop */
+      }
+      resolve(result)
+    }
+    const onAbort = () => finish({ open: false, error: "aborted" })
+    signal.addEventListener("abort", onAbort, { once: true })
+    timer = setTimeout(() => finish({ open: false, error: `timeout after ${timeoutMs}ms` }), timeoutMs)
+    sock.once("connect", () => finish({ open: true }))
+    sock.once("error", (err: NodeJS.ErrnoException) => finish({ open: false, error: err?.code ?? err?.message ?? "error" }))
+  })
 }
 
 export const WaitTool = Tool.define(
@@ -464,6 +508,112 @@ export const WaitTool = Tool.define(
                   : aborted
                     ? `Wait cancelled after ${elapsed.toFixed(1)}s. Last status: ${lastStatus ?? lastError ?? "no response"}. Reason: ${params.reason}`
                     : `Timed out after ${elapsed.toFixed(1)}s polling ${params.until_url}. Last status: ${lastStatus ?? lastError ?? "no response"} (expected ${expectedStatus}). Reason: ${params.reason}`,
+            })
+          }
+
+          if (params.until_port !== undefined) {
+            const port = params.until_port
+            const host = params.until_port_host ?? "127.0.0.1"
+            yield* ctx.metadata({
+              title: `wait up to ${params.seconds}s for ${host}:${port}`,
+              metadata: {
+                mode: "until_port",
+                port,
+                port_host: host,
+                seconds: params.seconds,
+                reason: params.reason,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+              },
+            })
+
+            let aborted = false
+            let cancelledByFile = false
+            let pollCount = 0
+            let opened = false
+            let lastError: string | undefined
+            let lastTitleUpdate = start
+
+            while (Date.now() < deadline) {
+              if (yield* checkCancel()) {
+                cancelledByFile = true
+                break
+              }
+              pollCount++
+
+              const probe = yield* Effect.promise(() =>
+                probeTcpPort(host, port, ctx.abort, Math.min(DEFAULT_URL_TIMEOUT_MS, Math.max(500, pollIntervalMs * 2))),
+              )
+              if (probe.open) {
+                opened = true
+                break
+              }
+              lastError = probe.error
+
+              const now = Date.now()
+              if (now - lastTitleUpdate >= 1000 && now < deadline) {
+                lastTitleUpdate = now
+                const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+                yield* ctx.metadata({
+                  title: `${host}:${port} ${lastError ?? "no-conn"} (${left}s left)`,
+                  metadata: {
+                    mode: "until_port",
+                    port,
+                    port_host: host,
+                    port_last_error: lastError,
+                    seconds: params.seconds,
+                    reason: params.reason,
+                    elapsed_seconds: (now - start) / 1000,
+                    remaining_seconds: left,
+                    polls: pollCount,
+                    poll_interval_ms: pollIntervalMs,
+                    cancel_if_file: cancelTarget,
+                  },
+                })
+              }
+
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) break
+              const tick = yield* abortable(sleepMs(Math.min(pollIntervalMs, remaining)), ctx.abort)
+              if (tick === "__aborted__") {
+                aborted = true
+                break
+              }
+            }
+
+            const elapsed = (Date.now() - start) / 1000
+            return done({
+              title: opened
+                ? `${host}:${port} accepting connections (${elapsed.toFixed(1)}s)`
+                : cancelledByFile
+                  ? `wait cancelled by file after ${elapsed.toFixed(1)}s`
+                  : aborted
+                    ? `wait cancelled after ${elapsed.toFixed(1)}s`
+                    : `wait timed out after ${elapsed.toFixed(1)}s`,
+              metadata: {
+                mode: "until_port",
+                port,
+                port_host: host,
+                port_open: opened,
+                port_last_error: opened ? undefined : lastError,
+                seconds: params.seconds,
+                elapsed_seconds: elapsed,
+                polls: pollCount,
+                reason: params.reason,
+                ready: opened,
+                timed_out: !opened && !aborted && !cancelledByFile,
+                aborted,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+                cancelled_by_file: cancelledByFile,
+              },
+              output: opened
+                ? `TCP ${host}:${port} accepted a connection after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                : cancelledByFile
+                  ? `Wait cancelled after ${elapsed.toFixed(1)}s because sentinel file exists: ${cancelTarget}. Last error: ${lastError ?? "no error"}. Reason: ${params.reason}`
+                  : aborted
+                    ? `Wait cancelled after ${elapsed.toFixed(1)}s. Last error: ${lastError ?? "no error"}. Reason: ${params.reason}`
+                    : `Timed out after ${elapsed.toFixed(1)}s waiting for TCP ${host}:${port}. Last error: ${lastError ?? "no error"}. Reason: ${params.reason}`,
             })
           }
 

@@ -6,7 +6,7 @@ Use this when:
 - You're starting a long automated session and want to confirm dependencies before you commit.
 
 Parameters:
-- `targets` (optional): array of which targets to probe. Any subset of `ring`, `ring_multimodal`, `sg1`, `sg2`, `scheduler`, `deepseek`, `openrouter`. Default probes `ring`, `sg1`, `sg2`, `scheduler` (the cheap reachability checks). Pass `ring_multimodal` to also verify whether Ring 2.5 1T accepts image_url content — at time of writing the SG proxy strips images and Ring is text-only, so this probe is mainly here so future runs can detect a change without re-running ad-hoc curl tests. Pass `deepseek` or `openrouter` to confirm the upstream OpenAI-compatible API is reachable and the API key still works (`/models` endpoint).
+- `targets` (optional): array of which targets to probe. Any subset of `ring`, `ring_text`, `ring_multimodal`, `sg1`, `sg2`, `scheduler`, `deepseek`, `openrouter`. Default probes `ring`, `sg1`, `sg2`, `scheduler` (the cheap reachability checks). Pass `ring_text` to additionally exercise a real text-only chat completion against Ring — useful when `/models` lists the model but completions still 5xx (proxy half-up state). Pass `ring_multimodal` to also verify whether Ring 2.5 1T accepts image_url content — at time of writing the SG proxy strips images and Ring is text-only, so this probe is mainly here so future runs can detect a change without re-running ad-hoc curl tests. Pass `deepseek` or `openrouter` to confirm the upstream OpenAI-compatible API is reachable and the API key still works (`/models` endpoint).
 - `ring_base_url` (optional): override the Ring proxy base URL. Default `https://doxx.lat/ring/v1`.
 - `ring_api_key` (optional): override the bearer token. By default the tool reads it from the OpenCode config (`provider.sg-ring.options.apiKey`).
 - `sg1_url` (optional): override the SG1 MCP URL. Default `https://doxx.lat/mcp/sse`.
@@ -18,6 +18,7 @@ Parameters:
 Behavior:
 - Each target is probed independently and concurrently.
 - For Ring, the tool hits `/models` with the bearer token and reports HTTP status + whether `Ring-2.5-1T` is in the model list.
+- For `ring_text`, the tool POSTs a small text-only chat completion and verifies the model echoes a sentinel string. This catches the common "proxy lists models but completions are dead" failure mode that the cheaper `ring` probe cannot detect.
 - For `ring_multimodal`, the tool POSTs a tiny chat completion with one text part and one image_url part (a 1x1 PNG) and inspects the response: if the response body contains a "non-text attachment(s) ... were dropped" note, Ring is confirmed text-only; if the response echoes the requested string and no drop note appears, Ring is multimodal.
 - For SG1/SG2, the tool issues a HEAD/GET to the SSE endpoint and reports whether the server is reachable; SG1 and SG2 are recorded as siblings of the same unified server.
 - For sg-scheduler, the tool checks whether the configured command exists on PATH and whether the script file is present.
@@ -31,6 +32,7 @@ Output:
 Examples:
 - Check everything (default targets): `{}`
 - Just Ring: `{ "targets": ["ring"] }`
+- Confirm Ring text completions actually work end-to-end: `{ "targets": ["ring_text"] }`
 - Confirm Ring is still text-only: `{ "targets": ["ring_multimodal"] }`
 - Cross-check the SG1/SG2 mirrors with a tighter timeout: `{ "targets": ["sg1", "sg2"], "timeout_ms": 3000 }`
 - Verify upstream provider keys: `{ "targets": ["deepseek", "openrouter"] }`
