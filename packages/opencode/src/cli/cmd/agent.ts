@@ -53,6 +53,8 @@ const AVAILABLE_TOOLS = [
   "url",
   "math",
   "random",
+  "xml",
+  "template",
 ]
 
 const AgentCreateCommand = cmd({

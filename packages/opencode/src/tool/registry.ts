@@ -40,6 +40,8 @@ import { TextTool } from "./text"
 import { UrlTool } from "./url"
 import { MathTool } from "./math"
 import { RandomTool } from "./random"
+import { XmlTool } from "./xml"
+import { TemplateTool } from "./template"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -171,6 +173,8 @@ export const layer: Layer.Layer<
     const urltool = yield* UrlTool
     const mathtool = yield* MathTool
     const randomtool = yield* RandomTool
+    const xmltool = yield* XmlTool
+    const templatetool = yield* TemplateTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -288,6 +292,8 @@ export const layer: Layer.Layer<
           url: Tool.init(urltool),
           math: Tool.init(mathtool),
           random: Tool.init(randomtool),
+          xml: Tool.init(xmltool),
+          template: Tool.init(templatetool),
         })
 
         return {
@@ -336,6 +342,8 @@ export const layer: Layer.Layer<
             tool.url,
             tool.math,
             tool.random,
+            tool.xml,
+            tool.template,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

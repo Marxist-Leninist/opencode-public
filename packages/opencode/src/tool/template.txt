@@ -1,0 +1,42 @@
+Render a Mustache-style template against a JSON data map.
+
+Useful for: building config files from a dictionary, generating prompt fragments, scaffolding boilerplate, expanding repeated lines from an array, building emails/issues/PRs from facts.
+
+Parameters:
+- `action` (required):
+  - `render` — render `template` (or `template_path`) using `data`.
+  - `extract` — return the list of variables/sections referenced by the template (no rendering, no `data` required).
+- `template` (optional): inline template string. Either this or `template_path` is required.
+- `template_path` (optional): read template from file.
+- `data` (optional): an object whose keys are referenced by `{{var}}` tokens. Required for `render` (an empty object is allowed).
+- `output_path` (optional): write the rendered text to a file instead of returning inline.
+- `strict` (optional): when true (default false), throw on missing variables; otherwise expand to empty string.
+- `escape` (optional): `none` (default) — write raw, or `html` — HTML-escape `{{var}}` (use `{{{var}}}` to bypass).
+
+Template syntax:
+- `{{name}}` — substitute the value at `data.name`. Dot paths supported: `{{user.profile.email}}`.
+- `{{{name}}}` — same, but never escapes (only relevant when `escape: "html"`).
+- `{{!comment}}` and `{{!-- comment --}}` — removed from output.
+- `{{#each items}}…{{/each}}` — repeat the body for each element of the array. Inside the body:
+    - `{{this}}` is the current item (or `{{.}}`).
+    - `{{@index}}` is the 0-based index.
+    - `{{@first}}` and `{{@last}}` are booleans, useful inside `{{#if}}`.
+    - Object items expose their keys directly (`{{name}}` inside an `{{#each users}}` block).
+- `{{#if cond}}…{{/if}}` — render body when `cond` is truthy (non-empty array, non-zero number, non-empty string, true).
+- `{{#if cond}}…{{else}}…{{/if}}` — supported.
+- `{{#unless cond}}…{{/unless}}` — inverse of `if`.
+- Tokens are whitespace-tolerant: `{{ name }}` is the same as `{{name}}`.
+
+Limits:
+- Max 16 MiB template, 16 MiB rendered output.
+- No partials, no `lambda` helpers, no inheritance.
+
+Examples:
+- Render a greeting:
+  `{ "action": "render", "template": "Hello, {{name}}!", "data": { "name": "world" } }`
+- Build a list:
+  `{ "action": "render", "template": "{{#each items}}- {{this}}\n{{/each}}", "data": { "items": ["a","b"] } }`
+- Conditional block:
+  `{ "action": "render", "template": "{{#if email}}Email: {{email}}{{else}}(no email){{/if}}", "data": { "email": "x@y" } }`
+- See which variables a template uses:
+  `{ "action": "extract", "template": "Hi {{user.name}}, you have {{count}} {{#if plural}}items{{else}}item{{/if}}." }`

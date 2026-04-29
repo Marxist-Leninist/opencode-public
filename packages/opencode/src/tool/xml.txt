@@ -1,0 +1,35 @@
+Convert between XML and JSON.
+
+Use this for reading or producing XML documents — RSS/Atom feeds, SOAP envelopes, Maven/POM, AndroidManifest.xml, SVG, OPML, plist (XML form), JUnit test reports, etc.
+
+Parameters:
+- `action` (required):
+  - `parse`      — XML → JSON tree (default attribute prefix `@`, text key `#text`).
+  - `to_json`    — alias of parse.
+  - `stringify`  — JSON tree → XML.
+  - `from_json`  — alias of stringify.
+- `content` (optional): inline input. For parse/to_json: XML; for stringify/from_json: JSON.
+- `filePath` (optional): read input from file instead of `content`.
+- `output_path` (optional): write the result to a file instead of returning inline.
+- `pretty` (optional): pretty-print output (default true).
+- `attribute_prefix` (optional): key prefix used for attributes (default `@`).
+- `text_key` (optional): key used for the text child of mixed-content nodes (default `#text`).
+- `xml_declaration` (optional): when stringifying, prepend `<?xml version="1.0" encoding="UTF-8"?>` (default true).
+
+JSON shape:
+- An element becomes an object. Attributes use the `attribute_prefix` (`@attr`). Pure-text elements become a string. Mixed content uses the `text_key`. Repeated child names become arrays.
+- Example: `<a x="1"><b>hi</b><b>bye</b></a>` ↔ `{"a":{"@x":"1","b":["hi","bye"]}}`.
+
+Limits:
+- Strips XML comments (`<!-- ... -->`), DOCTYPE declarations, and processing instructions other than the leading XML declaration.
+- CDATA sections are unwrapped.
+- Namespaces are kept as literal prefixes (e.g. `<atom:link>` becomes the key `atom:link`); xmlns declarations show up as attributes.
+- Max 32 MiB input.
+
+Examples:
+- Parse an Android manifest: `{ "action": "parse", "filePath": "AndroidManifest.xml" }`
+- Build a tiny RSS skeleton: `{ "action": "stringify", "content": "{\"rss\":{\"@version\":\"2.0\",\"channel\":{\"title\":\"hi\"}}}" }`
+
+Do NOT use this tool to:
+- Preserve comments, processing instructions, or exact whitespace — round-tripping drops them.
+- Validate against a DTD/XSD — that's outside scope.
