@@ -61,6 +61,7 @@ import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
+import { DialogChatSearch } from "@/components/dialog-chat-search"
 import { Titlebar } from "@/components/titlebar"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
@@ -1071,6 +1072,13 @@ export default function Layout(props: ParentProps) {
         onSelect: () => navigateSessionByOffset(-1),
       },
       {
+        id: "session.search",
+        title: "Search chats",
+        category: language.t("command.category.session"),
+        keybind: "mod+shift+f",
+        onSelect: () => openChatSearch(),
+      },
+      {
         id: "session.next",
         title: language.t("command.session.next"),
         category: language.t("command.category.session"),
@@ -1221,6 +1229,10 @@ export default function Layout(props: ParentProps) {
       if (dialogDead || dialogRun !== run) return
       dialog.show(() => <x.DialogSettings />)
     })
+  }
+
+  function openChatSearch() {
+    dialog.show(() => <DialogChatSearch initialDirectory={currentDir() || undefined} />)
   }
 
   function projectRoot(directory: string) {
@@ -2229,6 +2241,15 @@ export default function Layout(props: ParentProps) {
                         </Button>
                         <Button
                           size="large"
+                          icon="magnifying-glass"
+                          variant="ghost"
+                          class="w-full"
+                          onClick={openChatSearch}
+                        >
+                          Search chats
+                        </Button>
+                        <Button
+                          size="large"
                           icon="task"
                           variant={location.pathname.endsWith("/automations") ? "secondary" : "ghost"}
                           class="w-full"
@@ -2278,6 +2299,15 @@ export default function Layout(props: ParentProps) {
                         }}
                       >
                         {language.t("workspace.new")}
+                      </Button>
+                      <Button
+                        size="large"
+                        icon="magnifying-glass"
+                        variant="ghost"
+                        class="w-full"
+                        onClick={openChatSearch}
+                      >
+                        Search chats
                       </Button>
                       <Button
                         size="large"

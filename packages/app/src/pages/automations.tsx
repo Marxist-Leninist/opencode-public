@@ -396,10 +396,14 @@ export default function AutomationsPage() {
                           <Button
                             size="small"
                             icon="arrow-right"
-                            disabled={busyItem(item)}
+                            disabled={busyItem(item) || !item.enabled}
                             onClick={() => runAction(item, "run_now")}
                           >
-                            {busyFor(item, "run_now") || busyFor(item, "tail") ? "Running..." : "Run"}
+                            {busyFor(item, "run_now") || busyFor(item, "tail")
+                              ? "Running..."
+                              : item.enabled
+                                ? "Run"
+                                : "Paused"}
                           </Button>
                           <Button
                             size="small"

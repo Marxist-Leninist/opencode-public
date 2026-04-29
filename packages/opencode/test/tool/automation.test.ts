@@ -123,9 +123,13 @@ describe("tool.automation", () => {
       expect(script).toContain("setlocal enabledelayedexpansion")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_RUN=1")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_ID=demo")
+      expect(script).toContain('set "DEF=C:\\state\\demo.json"')
       expect(script).toContain("Get-Date -Format yyyyMMdd-HHmmss-fff")
       expect(script).toContain('set "LOG=C:\\state\\logs\\demo\\!TS!.log"')
       expect(script).toContain('1>> "!LOG!" 2>&1')
+      expect(script).toContain("ConvertFrom-Json")
+      expect(script).toContain('skipped: automation is paused')
+      expect(script).toContain('"skipped":"paused"')
       expect(script).toContain('set "SESSION_FILE=C:\\state\\sessions\\demo.txt"')
       expect(script).toContain('OPENCODE_SG_AUTOMATION_SESSION_FILE=!SESSION_FILE!')
       expect(script).toContain("!SESSION_ARGS!")
@@ -224,6 +228,44 @@ describe("tool.automation", () => {
         expect(logs.metadata.action).toBe("logs")
         expect(logs.metadata.log_run_ts).toBe("20260101-100000")
         expect(logs.output).toContain("final line")
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (prev === undefined) delete process.env.OPENCODE_SG_AUTOMATION_DIR
+            else process.env.OPENCODE_SG_AUTOMATION_DIR = prev
+          }),
+        ),
+      )
+    }),
+  )
+
+  it.live("does not manually run a paused automation", () =>
+    provideTmpdirInstance((dir) => {
+      const prev = process.env.OPENCODE_SG_AUTOMATION_DIR
+      process.env.OPENCODE_SG_AUTOMATION_DIR = path.join(dir, "automation-state")
+
+      return Effect.gen(function* () {
+        const toolInfo = yield* AutomationTool
+        const tool = yield* toolInfo.init()
+
+        yield* tool.execute(
+          {
+            action: "create",
+            title: "Paused Manual Run",
+            prompt: "should not run",
+            schedule: "hourly",
+            interval_minutes: 1,
+            enabled: false,
+            install: false,
+          },
+          baseCtx,
+        )
+
+        const started = yield* tool.execute({ action: "run_now", id: "paused-manual-run" }, baseCtx)
+        expect(started.title).toBe("automation paused: paused-manual-run")
+        expect(started.metadata.enabled).toBe(false)
+        expect(started.metadata.running).toBe(false)
+        expect(started.output).toContain("Skipped")
       }).pipe(
         Effect.ensuring(
           Effect.sync(() => {

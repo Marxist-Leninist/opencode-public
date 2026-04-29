@@ -152,6 +152,7 @@ type Metadata = {
   scheduler_next_run_time?: string
   scheduler_task_to_run?: string
   latest_log_path?: string
+  stop_exit_code?: number | null
 }
 
 const done = (result: Tool.ExecuteResult<Metadata>) => result
@@ -365,6 +366,7 @@ function buildRunnerScript(def: AutomationDefinition) {
     "set OPENCODE_SG_PERMISSION_MODE=allow",
     "set OPENCODE_SG_AUTOMATION_RUN=1",
     `set OPENCODE_SG_AUTOMATION_ID=${def.id}`,
+    `set "DEF=${def.definition_path}"`,
     `cd /d ${cmdQuote(def.working_directory)}`,
     `if not exist ${cmdQuote(def.log_dir)} mkdir ${cmdQuote(def.log_dir)}`,
     `if not exist ${cmdQuote(path.dirname(def.history_path))} mkdir ${cmdQuote(path.dirname(def.history_path))}`,
@@ -382,6 +384,15 @@ function buildRunnerScript(def: AutomationDefinition) {
     `>> "!LOG!" echo title: ${def.title}`,
     `>> "!LOG!" echo session file: !SESSION_FILE!`,
     "echo. >> \"!LOG!\"",
+    `if exist "!DEF!" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "try { $d = Get-Content -Raw -LiteralPath $env:DEF | ConvertFrom-Json; if ($d.enabled -eq $false) { exit 42 } } catch { exit 0 }"`,
+    `if "!errorlevel!"=="42" (`,
+    `  >> "!LOG!" echo skipped: automation is paused in !DEF!`,
+    `  for /f "delims=" %%a in ('${timestampCommand()}') do set "END_TS=%%a"`,
+    `  if not defined END_TS set "END_TS=!TS!"`,
+    `  set "LOG_JSON=!LOG:\\=\\\\!"`,
+    `  >> "!HIST!" echo {"id":"${def.id}","ts":"!TS!","exit":0,"log":"!LOG_JSON!","end_ts":"!END_TS!","skipped":"paused"}`,
+    `  endlocal & exit /b 0`,
+    `)`,
     `type ${cmdQuote(def.prompt_path)} | call ${cmdQuote(launcherPath())} ${args.join(" ")} 1>> "!LOG!" 2>&1`,
     "set EXITCODE=!errorlevel!",
     `for /f "delims=" %%a in ('${timestampCommand()}') do set "END_TS=%%a"`,
@@ -540,7 +551,7 @@ async function schedulerStatus(def: AutomationDefinition, signal: AbortSignal) {
   return { ...result, parsed: parseTaskQuery(result.stdout) }
 }
 
-async function scheduler(action: "create" | "delete" | "enable" | "disable" | "run", def: AutomationDefinition, signal: AbortSignal) {
+async function scheduler(action: "create" | "delete" | "enable" | "disable" | "end" | "run", def: AutomationDefinition, signal: AbortSignal) {
   if (process.platform !== "win32") {
     return { code: 0, stdout: "", stderr: "OS scheduled task install is only implemented on Windows." }
   }
@@ -548,6 +559,7 @@ async function scheduler(action: "create" | "delete" | "enable" | "disable" | "r
   if (action === "delete") return runProcess("schtasks.exe", ["/Delete", "/TN", def.task_name, "/F"], signal)
   if (action === "enable") return runProcess("schtasks.exe", ["/Change", "/TN", def.task_name, "/ENABLE"], signal)
   if (action === "disable") return runProcess("schtasks.exe", ["/Change", "/TN", def.task_name, "/DISABLE"], signal)
+  if (action === "end") return runProcess("schtasks.exe", ["/End", "/TN", def.task_name], signal, 5000)
   return runProcess("schtasks.exe", ["/Run", "/TN", def.task_name], signal, 5000)
 }
 
@@ -833,6 +845,24 @@ export const AutomationTool = Tool.define(
         if (params.action === "enable" || params.action === "disable" || params.action === "run_now") {
           const def = yield* Effect.promise(() => readDefinition(id))
           if (params.action === "run_now") {
+            if (!def.enabled) {
+              return done({
+                title: `automation paused: ${id}`,
+                metadata: {
+                  action: "run_now",
+                  id,
+                  enabled: false,
+                  installed: false,
+                  scheduler: process.platform === "win32" ? "windows_schtasks" : "definition_only",
+                  task_name: def.task_name,
+                  session_path: def.session_path,
+                  log_dir: def.log_dir ?? logDir(id),
+                  history_path: def.history_path ?? historyPath(id),
+                  running: false,
+                },
+                output: `Skipped ${summarize(def)} because it is paused. Enable it before running manually.`,
+              })
+            }
             const scheduled = yield* Effect.promise(() => scheduler("run", def, ctx.abort))
             const failure = schedulerFailure(scheduled)
             if (failure) throw new Error(`automation: failed to run ${id}: ${failure}`)
@@ -877,6 +907,8 @@ export const AutomationTool = Tool.define(
             params.action === "enable"
               ? yield* Effect.promise(() => scheduler("create", def, ctx.abort))
               : yield* Effect.promise(() => scheduler("disable", def, ctx.abort))
+          const stopped =
+            params.action === "disable" ? yield* Effect.promise(() => scheduler("end", def, ctx.abort)) : undefined
           const failure = schedulerFailure(scheduled)
           if (failure && params.action === "enable") throw new Error(`automation: failed to enable ${id}: ${failure}`)
           return done({
@@ -889,8 +921,9 @@ export const AutomationTool = Tool.define(
               scheduler: process.platform === "win32" ? "windows_schtasks" : "definition_only",
               task_name: def.task_name,
               exit_code: scheduled.code,
+              stop_exit_code: stopped?.code,
             },
-            output: `${params.action === "enable" ? "Enabled" : "Disabled"} ${summarize(def)}.${failure ? ` Scheduler detail: ${failure}` : ""}`,
+            output: `${params.action === "enable" ? "Enabled" : "Disabled"} ${summarize(def)}.${params.action === "disable" ? " Any currently running scheduled task was also asked to stop." : ""}${failure ? ` Scheduler detail: ${failure}` : ""}`,
           })
         }
 
@@ -949,9 +982,13 @@ export const AutomationTool = Tool.define(
         const scheduled =
           shouldInstall && def.enabled
             ? yield* Effect.promise(() => scheduler("create", def, ctx.abort))
-            : undefined
+            : shouldInstall && existing && !def.enabled
+              ? yield* Effect.promise(() => scheduler("disable", def, ctx.abort))
+              : undefined
+        const stopped =
+          shouldInstall && existing && !def.enabled ? yield* Effect.promise(() => scheduler("end", def, ctx.abort)) : undefined
         const failure = scheduled ? schedulerFailure(scheduled) : undefined
-        if (failure) throw new Error(`automation: failed to install ${id}: ${failure}`)
+        if (failure && def.enabled) throw new Error(`automation: failed to install ${id}: ${failure}`)
 
         return done({
           title: `${params.action === "create" ? "created" : "updated"} automation: ${def.id}`,
@@ -969,6 +1006,7 @@ export const AutomationTool = Tool.define(
             log_dir: def.log_dir,
             history_path: def.history_path,
             exit_code: scheduled?.code,
+            stop_exit_code: stopped?.code,
           },
           output: [
             `${params.action === "create" ? "Created" : "Updated"} ${summarize(def)}.`,

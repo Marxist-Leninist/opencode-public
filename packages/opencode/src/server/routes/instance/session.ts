@@ -5,6 +5,7 @@ import { SessionID, MessageID, PartID } from "@/session/schema"
 import z from "zod"
 import { Session } from "@/session"
 import { MessageV2 } from "@/session/message-v2"
+import { SessionSearch } from "@/session/search"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
 import { SessionCompaction } from "@/session/compaction"
@@ -100,6 +101,58 @@ export const SessionRoutes = lazy(() =>
           const svc = yield* SessionStatus.Service
           return Object.fromEntries(yield* svc.list())
         }),
+    )
+    .get(
+      "/search",
+      describeRoute({
+        summary: "Search chat history",
+        description: "Search session titles and stored chat message parts for matching text.",
+        operationId: "session.search",
+        responses: {
+          200: {
+            description: "Search results",
+            content: {
+              "application/json": {
+                schema: resolver(SessionSearch.Response),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("query", SessionSearch.Input),
+      async (c) => {
+        const query = c.req.valid("query")
+        return jsonRequest("SessionRoutes.search", c, function* () {
+          return yield* SessionSearch.search(query)
+        })
+      },
+    )
+    .post(
+      "/search/augment",
+      describeRoute({
+        summary: "Search chat history with AI",
+        description: "Search session history and ask a selected model to summarize the matching chats.",
+        operationId: "session.search.augment",
+        responses: {
+          200: {
+            description: "AI-augmented search result",
+            content: {
+              "application/json": {
+                schema: resolver(SessionSearch.AugmentResponse),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", SessionSearch.AugmentInput),
+      async (c) => {
+        const body = c.req.valid("json")
+        return jsonRequest("SessionRoutes.searchAugment", c, function* () {
+          return yield* SessionSearch.augment(body)
+        })
+      },
     )
     .get(
       "/:sessionID",
