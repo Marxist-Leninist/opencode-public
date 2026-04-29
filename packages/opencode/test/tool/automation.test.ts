@@ -120,7 +120,7 @@ describe("tool.automation", () => {
       expect(script).toContain("setlocal enabledelayedexpansion")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_RUN=1")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_ID=demo")
-      expect(script).toContain("Get-Date -Format yyyyMMdd-HHmmss")
+      expect(script).toContain("Get-Date -Format yyyyMMdd-HHmmss-fff")
       expect(script).toContain('set "LOG=C:\\state\\logs\\demo\\!TS!.log"')
       expect(script).toContain('1>> "!LOG!" 2>&1')
       expect(script).toContain('set "LOG_JSON=!LOG:\\=\\\\!"')

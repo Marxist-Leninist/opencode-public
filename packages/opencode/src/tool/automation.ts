@@ -276,7 +276,7 @@ function launcherPath() {
 }
 
 function timestampCommand() {
-  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Get-Date -Format yyyyMMdd-HHmmss"`
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Get-Date -Format yyyyMMdd-HHmmss-fff"`
 }
 
 function buildRunnerScript(def: AutomationDefinition) {
@@ -613,7 +613,7 @@ export const AutomationTool = Tool.define(
             })
           }
           const tailed = yield* Effect.promise(() => tailFile(found, DEFAULT_LOG_TAIL_BYTES, tailLines))
-          const tsMatch = path.basename(found).match(/^(\d{8}-\d{6})\.log$/)
+          const tsMatch = path.basename(found).match(/^(\d{8}-\d{6}(?:-\d{3})?)\.log$/)
           return done({
             title: `automation logs: ${id} (${path.basename(found)})`,
             metadata: {
