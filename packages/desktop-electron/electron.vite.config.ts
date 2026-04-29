@@ -76,6 +76,7 @@ export default defineConfig({
     },
     build: {
       ...buildDefaults,
+      target: "esnext",
       rollupOptions: {
         input: {
           main: "src/renderer/index.html",
