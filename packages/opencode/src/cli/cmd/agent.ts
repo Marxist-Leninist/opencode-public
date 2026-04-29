@@ -59,6 +59,12 @@ const AVAILABLE_TOOLS = [
   "markdown",
   "html",
   "image",
+  "env",
+  "which",
+  "crypto",
+  "compress",
+  "semver",
+  "path",
 ]
 
 const AgentCreateCommand = cmd({

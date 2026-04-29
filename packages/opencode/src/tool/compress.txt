@@ -1,0 +1,33 @@
+Compress or decompress a single byte stream with gzip, deflate, deflate-raw, or brotli.
+
+Use this when you need to round-trip a single payload — gzip a request body, decompress a `.gz` file's contents, deflate a small string, or unbrotli a CDN response cached on disk. For multi-file archives use `archive` (zip/tar) instead.
+
+Parameters:
+- `action` (required): `"compress"` or `"decompress"`.
+- `algorithm` (required): one of:
+  - `gzip` — RFC 1952. Default for most CLI tools / HTTP `Content-Encoding: gzip`.
+  - `deflate` — RFC 1950 zlib wrapper. HTTP `Content-Encoding: deflate`.
+  - `deflate-raw` — Raw DEFLATE without zlib header. Used inside zip files, PNG, etc.
+  - `brotli` — RFC 7932. HTTP `Content-Encoding: br`.
+- `value` (string, optional) — inline string input. Mutually exclusive with `inputPath`.
+- `inputPath` (string, optional) — path to a file to read. Mutually exclusive with `value`.
+- `outputPath` (string, optional) — write output to this path; otherwise it's returned inline (decoded according to `output_encoding`).
+- `value_encoding` (utf8 | hex | base64 | base64url) — how to interpret `value`. Default utf8 for compress, base64 for decompress (so callers can round-trip binary).
+- `output_encoding` (utf8 | hex | base64 | base64url) — encoding for inline output. Default base64 for compress (binary out), utf8 for decompress.
+- `level` (number, 0-11) — compression level. Default 6 (gzip/deflate) or 4 (brotli). Higher = smaller, slower. Ignored on decompress.
+
+Behavior:
+- Streams via Node's `zlib`. For files, both input and output stream so memory stays bounded. For inline strings the cap is 64 MiB input.
+- On compress, returns metadata with `input_bytes`, `output_bytes`, and `ratio` (output/input).
+- On decompress, returns metadata with the decompressed size.
+- Path arguments resolve relative to the project directory; absolute paths are honored.
+
+Examples:
+- Gzip a string: `{ "action": "compress", "algorithm": "gzip", "value": "hello hello hello" }` → returns base64 of gzipped bytes.
+- Decompress a `.gz` file: `{ "action": "decompress", "algorithm": "gzip", "inputPath": "data.json.gz", "outputPath": "data.json" }`.
+- Brotli a payload at level 11: `{ "action": "compress", "algorithm": "brotli", "value": "<json>", "level": 11 }`.
+- Decompress an HTTP body captured as base64: `{ "action": "decompress", "algorithm": "gzip", "value": "<b64>", "value_encoding": "base64" }`.
+
+Do NOT use this tool to:
+- Create or extract zip/tar archives (use `archive`).
+- Hash a file (use `hash`).

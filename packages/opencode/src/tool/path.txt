@@ -1,0 +1,43 @@
+Pure path-string operations: parse, join, normalize, resolve, relative, dirname, basename, extname, isAbsolute, format, toPosix, toWindows.
+
+Use this when you need to manipulate path strings without spawning a shell, especially when stitching together paths cross-platform. No filesystem IO — these are byte-level transforms over strings.
+
+Parameters:
+- `action` (required):
+  - `parse` — Split `value` into `{ root, dir, base, name, ext }`.
+  - `join` — Join `parts[]` with the platform separator (or `flavor`).
+  - `resolve` — Resolve `parts[]` to an absolute path against `cwd` (or the project directory).
+  - `normalize` — Collapse `..`/`.`, double separators, in `value`.
+  - `relative` — Compute relative path from `from` to `to`.
+  - `dirname` — Directory component of `value`.
+  - `basename` — Last component of `value`. Optional `ext` suffix to strip.
+  - `extname` — File extension of `value` (including the dot).
+  - `is_absolute` — Boolean: is `value` absolute?
+  - `format` — Build a path string from `{ root, dir, base, name, ext }`.
+  - `to_posix` — Convert backslashes → forward slashes.
+  - `to_windows` — Convert forward slashes → backslashes.
+  - `common_prefix` — Longest path prefix shared by `parts[]`.
+  - `split` — Split `value` on the chosen flavor's separator.
+- `value` (string): the path for actions that take a single path.
+- `parts` (string[]): inputs for join/resolve/common_prefix.
+- `from`, `to` (strings): for relative.
+- `cwd` (string): base for resolve. Default = project directory.
+- `ext` (string): suffix to strip in basename, or extension to set in format.
+- `format_input` (object): `{ root?, dir?, base?, name?, ext? }` for format action.
+- `flavor` (`posix` | `win32` | `auto`): which separator semantics. Default `auto` (matches current OS).
+
+Behavior:
+- Maps directly to Node's `path.posix` / `path.win32` modules; semantics match Node exactly.
+- All actions are pure — no `stat`, no resolution against the real filesystem.
+- `to_posix`/`to_windows` are pure string replacements; they do NOT prepend a drive letter or `/`.
+
+Examples:
+- Parse: `{ "action": "parse", "value": "/home/u/file.txt" }` → `{ root:"/", dir:"/home/u", base:"file.txt", name:"file", ext:".txt" }`.
+- Join cross-platform: `{ "action": "join", "parts": ["a","b","c.txt"], "flavor": "posix" }` → `a/b/c.txt`.
+- Relative: `{ "action": "relative", "from": "/a/b", "to": "/a/c/d" }` → `../c/d`.
+- Strip extension: `{ "action": "basename", "value": "/foo/bar.tar.gz", "ext": ".gz" }` → `bar.tar`.
+- Convert path style: `{ "action": "to_posix", "value": "C:\\Users\\me\\f" }` → `C:/Users/me/f`.
+
+Do NOT use this tool to:
+- Read or stat files (use `read`/`bash`/`disk`).
+- Glob (use `glob`).

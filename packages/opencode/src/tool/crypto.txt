@@ -1,0 +1,45 @@
+Cryptographic primitives: HMAC, AES-GCM and AES-CBC symmetric encryption, key generation, and timing-safe equality comparison.
+
+Use this when you need real crypto in-process (verify a webhook signature, sign a payload, encrypt a small secret, generate a session token) without spawning OpenSSL or shelling out. All operations run via Node `crypto` — no plaintext leaves the process.
+
+Parameters:
+- `action` (required): one of:
+  - `hmac` — HMAC-`hmac_algo` over `value`. Returns the digest in `output_encoding`. Use `expected` for a timing-safe compare.
+  - `encrypt` — Symmetric encryption with `cipher`. Returns `ciphertext`, `iv`, and `tag` (GCM only). Caller passes `key`.
+  - `decrypt` — Reverse of `encrypt`. Pass `ciphertext`, `iv`, `key`, plus `tag` for GCM.
+  - `gen_key` — Random key for `cipher` (or raw bytes of `length`). Useful for bootstrapping AES keys.
+  - `equal` — Timing-safe constant-time string comparison (defends against timing attacks on tokens / signatures).
+- `value` (string): plaintext for hmac/encrypt, ciphertext for decrypt, "left" string for equal.
+- `value2` (string): "right" string for equal action.
+- `value_encoding` (utf8 | hex | base64 | base64url): how to interpret `value`/`value2`. Default utf8.
+- `output_encoding` (hex | base64 | base64url | utf8): result encoding. Default hex; utf8 is only valid for decrypt.
+- `key` (string): HMAC secret or AES key, in `key_encoding` (hex | base64 | base64url | utf8 — default utf8). For AES, key bytes must match cipher length: aes-128-* = 16 bytes, aes-256-* = 32 bytes.
+- `key_encoding`: see above.
+- `hmac_algo`: sha256 (default), sha512, sha1, sha384, md5.
+- `cipher`: aes-256-gcm (default), aes-128-gcm, aes-256-cbc, aes-128-cbc.
+- `iv` (string): 12 bytes for GCM (recommended) or 16 bytes for CBC, in `iv_encoding`. If omitted on encrypt, a fresh random IV is generated and returned.
+- `iv_encoding` (hex | base64 | base64url): default hex.
+- `tag` (string): GCM auth tag from a previous encrypt, base64/hex/base64url. Required to decrypt GCM.
+- `tag_encoding`: same options. Default hex.
+- `aad` (string): optional GCM associated data. Same `value_encoding`.
+- `length` (number): bytes for `gen_key` action when no `cipher` given. Default 32 (256 bits). Max 4096.
+- `expected` (string): expected HMAC digest (hex/base64/base64url; auto-detected). When set on `hmac`, the tool runs a timing-safe compare and returns `metadata.matches`.
+
+Behavior:
+- AES-GCM is preferred — it provides authentication via the tag. Use AES-CBC only if you're talking to a legacy system that demands it.
+- All HMAC compares and `equal` use `crypto.timingSafeEqual` (constant time per byte) to avoid leaking information through response timing.
+- IVs and keys are generated with `crypto.randomBytes` (CSPRNG).
+- This is a transform tool. No filesystem or network IO.
+
+Examples:
+- HMAC-SHA256 a Stripe webhook payload: `{ "action": "hmac", "value": "<raw body>", "key": "whsec_…", "hmac_algo": "sha256" }`
+- Verify a signature in constant time: `{ "action": "hmac", "value": "<body>", "key": "<secret>", "expected": "<header sig>" }`
+- Generate an AES-256 key: `{ "action": "gen_key", "cipher": "aes-256-gcm", "output_encoding": "base64" }`
+- Encrypt a token: `{ "action": "encrypt", "value": "user-id-1234", "key": "<base64 key>", "key_encoding": "base64", "cipher": "aes-256-gcm" }`
+- Decrypt: pass back `ciphertext`, `iv`, `tag`, `key`.
+- Constant-time string compare: `{ "action": "equal", "value": "abc", "value2": "abc" }`
+
+Do NOT use this tool to:
+- Hash files (use `hash`).
+- Encode/decode (use `encode`).
+- Verify a JWT signature (this tool can verify if you pass the right key + alg, but the JWT decode lives in `encode`).

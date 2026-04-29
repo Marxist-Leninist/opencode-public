@@ -48,6 +48,10 @@ import { HtmlTool } from "./html"
 import { ImageTool } from "./image"
 import { EnvTool } from "./env"
 import { WhichTool } from "./which"
+import { CryptoTool } from "./crypto"
+import { CompressTool } from "./compress"
+import { SemverTool } from "./semver"
+import { PathTool } from "./path"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -187,6 +191,10 @@ export const layer: Layer.Layer<
     const imagetool = yield* ImageTool
     const envtool = yield* EnvTool
     const whichtool = yield* WhichTool
+    const cryptotool = yield* CryptoTool
+    const compresstool = yield* CompressTool
+    const semvertool = yield* SemverTool
+    const pathtool = yield* PathTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -312,6 +320,10 @@ export const layer: Layer.Layer<
           image: Tool.init(imagetool),
           env: Tool.init(envtool),
           which: Tool.init(whichtool),
+          crypto: Tool.init(cryptotool),
+          compress: Tool.init(compresstool),
+          semver: Tool.init(semvertool),
+          path: Tool.init(pathtool),
         })
 
         return {
@@ -368,6 +380,10 @@ export const layer: Layer.Layer<
             tool.image,
             tool.env,
             tool.which,
+            tool.crypto,
+            tool.compress,
+            tool.semver,
+            tool.path,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

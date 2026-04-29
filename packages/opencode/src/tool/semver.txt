@@ -1,0 +1,40 @@
+Parse, compare, increment, and match Semantic Versioning 2.0.0 versions and ranges.
+
+Use this when you're checking package versions, picking the highest version that satisfies a constraint, sorting a list, or bumping a version. Pure transform — no network or filesystem.
+
+Parameters:
+- `action` (required):
+  - `parse` — Validate one version, return its components.
+  - `compare` — Compare `a` vs `b`. Returns `-1`/`0`/`1`.
+  - `eq`, `lt`, `lte`, `gt`, `gte`, `neq` — Boolean comparisons of `a` vs `b`.
+  - `inc` — Increment `value` by `release` (`major`/`minor`/`patch`/`premajor`/`preminor`/`prepatch`/`prerelease`).
+  - `satisfies` — Test whether `value` matches `range` (npm-style: `^1.2.3`, `~1.2`, `>=1.0 <2.0`, `1.x`, `*`).
+  - `max_satisfying` / `min_satisfying` — Pick highest/lowest from `versions` that match `range`.
+  - `sort` — Sort `versions` ascending; `desc:true` for descending.
+  - `valid` — Boolean: is `value` a valid semver?
+  - `coerce` — Coerce a loose string (`v1`, `1.2`, `2026.4`) to a strict `MAJOR.MINOR.PATCH`.
+- `value` (string): one version (parse/inc/satisfies/valid/coerce).
+- `a`, `b` (string): two versions (compare/eq/lt/etc.).
+- `range` (string): npm-style range expression (satisfies/max_satisfying/min_satisfying).
+- `release` (string): bump kind for `inc`. Default `patch`.
+- `prerelease` (string): identifier for prerelease bumps (e.g. `"rc"` → `1.2.3-rc.0`). Default `pre`.
+- `versions` (string[]): list to filter or sort.
+- `desc` (boolean): sort descending.
+- `loose` (boolean): accept `v` prefix and missing minor/patch on parse/compare. Default true.
+
+Behavior:
+- Parses according to semver 2.0 BNF — `MAJOR.MINOR.PATCH(-PRERELEASE)?(+BUILD)?` with dot-separated identifiers.
+- Range expressions support: caret `^`, tilde `~`, comparators `<`, `<=`, `>`, `>=`, `=`, hyphen `1.2 - 2.3`, `x`/`X`/`*` wildcards, OR with `||`, AND by space.
+- Prerelease tags compare per spec: any prerelease < the corresponding stable; identifiers compare numerically when both numeric, lexically otherwise.
+- Comparisons ignore build metadata; equality respects only major.minor.patch+prerelease.
+
+Examples:
+- Parse: `{ "action": "parse", "value": "1.2.3-rc.1+build.42" }`.
+- Highest matching: `{ "action": "max_satisfying", "versions": ["1.0.0","1.2.3","2.0.0"], "range": "^1.0" }` → `1.2.3`.
+- Bump prerelease: `{ "action": "inc", "value": "1.2.3", "release": "prerelease", "prerelease": "rc" }` → `1.2.4-rc.0`.
+- Sort descending: `{ "action": "sort", "versions": ["1.0.0","0.9.0","1.10.0"], "desc": true }`.
+- Coerce: `{ "action": "coerce", "value": "v2026" }` → `2026.0.0`.
+
+Do NOT use this tool to:
+- Read package.json or fetch a registry — it's pure string math.
+- Check date versions like `2026-04-29` — those aren't semver.
