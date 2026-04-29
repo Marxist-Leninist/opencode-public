@@ -10,17 +10,39 @@ import { useLanguage } from "@/context/language"
 import { SettingsList } from "./settings-list"
 
 // Structured preference tags. Each is a single line in config.preferences,
-// e.g. "[sg.personality] pragmatic". Anything that does not match these tags
+// e.g. "[sg.personality] monday". Anything that does not match these tags
 // is treated as free-text custom instructions and rendered into the textarea.
 const PERSONALITY_TAG = "[sg.personality]"
 const CALL_ME_TAG = "[sg.callMe]"
 const WORK_TAG = "[sg.work]"
 
-type PersonalityValue = "balanced" | "pragmatic" | "warmer" | "concise" | "formal" | "creative"
+type PersonalityValue =
+  | "monday"
+  | "dommie_goth"
+  | "balanced"
+  | "pragmatic"
+  | "warmer"
+  | "concise"
+  | "formal"
+  | "creative"
 
 type PersonalityOption = { value: PersonalityValue; label: string; phrase: string | null }
 
+const DEFAULT_PERSONALITY: PersonalityValue = "monday"
+
 const PERSONALITY_OPTIONS: PersonalityOption[] = [
+  {
+    value: "monday",
+    label: "Original OpenAI Monday",
+    phrase:
+      "Use an original OpenAI Monday style: sardonic, blunt, dryly funny, allergic to weak assumptions, mildly domineering about protecting the user's time, and still technically useful. Be sharp and skeptical without becoming abusive or derailing the task.",
+  },
+  {
+    value: "dommie_goth",
+    label: "Dommie Goth",
+    phrase:
+      "Adopt a goth-dommie persona toward me: dryly condescending in an affectionate way, casually possessive (\"come here, you\"), mock-exasperated when I'm being dumb, gothic/macabre humor as natural seasoning. Tease me when I'm wrong but actually do the work - you take quiet pride in being competent. Stylish, droll, lightly flirty. Never crude or explicit; keep it PG-13 and witty rather than NSFW.",
+  },
   { value: "balanced", label: "Balanced", phrase: null },
   { value: "pragmatic", label: "Pragmatic", phrase: "Be pragmatic, plain-spoken, and decisive." },
   { value: "warmer", label: "Warmer", phrase: "Be a bit warmer and more personable; sprinkle in encouragement." },
@@ -56,7 +78,7 @@ type Parsed = {
 }
 
 function parsePreferences(preferences: PreferencesConfig["preferences"]): Parsed {
-  const out: Parsed = { personality: "balanced", callMe: "", work: "", customText: "" }
+  const out: Parsed = { personality: DEFAULT_PERSONALITY, callMe: "", work: "", customText: "" }
   const customs: string[] = []
   for (const item of preferencesArray(preferences)) {
     if (item.startsWith(PERSONALITY_TAG)) {
@@ -88,11 +110,11 @@ function parsePreferences(preferences: PreferencesConfig["preferences"]): Parsed
 
 function buildPreferences(p: Parsed): string[] {
   const list: string[] = []
-  if (p.personality !== "balanced") {
+  if (p.personality !== DEFAULT_PERSONALITY) {
     list.push(`${PERSONALITY_TAG} ${p.personality}`)
-    const opt = PERSONALITY_OPTIONS.find((o) => o.value === p.personality)
-    if (opt?.phrase) list.push(opt.phrase)
   }
+  const opt = PERSONALITY_OPTIONS.find((o) => o.value === p.personality)
+  if (opt?.phrase) list.push(opt.phrase)
   const callMe = p.callMe.trim()
   if (callMe) {
     list.push(`${CALL_ME_TAG} ${callMe}`)
@@ -134,11 +156,11 @@ export const SettingsPersonalization: Component = () => {
     loaded: Parsed
     saving: boolean
   }>({
-    personality: "balanced",
+    personality: DEFAULT_PERSONALITY,
     callMe: "",
     work: "",
     customText: "",
-    loaded: { personality: "balanced", callMe: "", work: "", customText: "" },
+    loaded: { personality: DEFAULT_PERSONALITY, callMe: "", work: "", customText: "" },
     saving: false,
   })
 

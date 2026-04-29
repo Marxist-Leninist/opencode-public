@@ -721,7 +721,7 @@ export const dict = {
   "settings.personalization.section.instructions": "Custom instructions",
   "settings.personalization.field.personality": "Personality",
   "settings.personalization.field.personality.description":
-    "Default tone the agent uses when no other style is requested.",
+    "Default tone the agent uses when no other style is requested. SG defaults to Original OpenAI Monday.",
   "settings.personalization.field.callMe": "What should the agent call you?",
   "settings.personalization.field.callMe.description":
     "Optional name or nickname. Pinned into the system prompt as \"Call me <name>\".",
