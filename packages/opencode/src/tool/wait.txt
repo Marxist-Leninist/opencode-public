@@ -10,6 +10,8 @@ Modes (mutually exclusive after `seconds`/`reason`):
 
 4. **Wait until process exits** - pass `seconds`, `reason`, and `until_pid_exit` (a numeric PID). The tool returns early once the process is gone. Use this when a backgrounded shell command does not write a sentinel file but you still need to know when it finished.
 
+5. **Wait until pattern in file** - pass `seconds`, `reason`, `until_text` (file path), and `until_text_pattern` (regex string, no surrounding slashes). The tool tails the file and returns as soon as the pattern matches. Optionally pass `text_pattern_flags` (default `m`) and `text_tail_bytes` (default 32768). Pairs well with backgrounded build/test jobs that write progress to a log file - use a pattern like `BUILD SUCCESSFUL` or `\\d+ passed`.
+
 Always provide a short `reason` string. It is shown to the user in the UI so they can see why the agent is paused.
 
 Optional controls (work in every mode):
@@ -23,6 +25,7 @@ Live progress in the UI:
 - `until_file`: title updates as the file grows (e.g. "driver.exe 423.4 MB / 800.0 MB (45s)").
 - `until_url`: title shows the most recent status code and seconds left.
 - `until_pid_exit`: title shows the pid and seconds left.
+- `until_text`: title shows the pattern and seconds left.
 - `fixed`: title counts down each second.
 
 This tool **blocks the current turn**. If you instead want to schedule a *new* opencode session to fire later (fire-and-forget, non-blocking), use the `sg-scheduler` MCP tools (`schedule_create`, `schedule_list`, etc.) - those create a separate scheduled invocation that runs at a future time without holding the current chat open.
@@ -41,5 +44,7 @@ Example uses:
 - Auth-protected health endpoint: `{ "seconds": 30, "reason": "wait for service", "until_url": "https://api.local/healthz", "until_url_status": 401 }`
 - Backgrounded job: `{ "seconds": 600, "reason": "wait for tar archive", "until_pid_exit": 12345, "poll_interval_ms": 1000 }`
 - External cancel sentinel: `{ "seconds": 600, "reason": "wait for backup unless cancel sentinel appears", "cancel_if_file": ".opencode-cancel-wait" }`
+- Pattern in log: `{ "seconds": 600, "reason": "wait for build to succeed", "until_text": "build.log", "until_text_pattern": "BUILD SUCCESSFUL", "poll_interval_ms": 1000 }`
+- Test runner: `{ "seconds": 300, "reason": "tests done", "until_text": "test.log", "until_text_pattern": "(\\\\d+ pass|\\\\d+ fail)", "text_pattern_flags": "im" }`
 
 Do NOT use this tool to artificially slow down responses, pad time, or wait on something you could check directly with `read`/`glob`/`grep`. Use it only when there is a genuine asynchronous event you need to wait on.

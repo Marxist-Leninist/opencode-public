@@ -49,6 +49,7 @@ import type { WebSearchTool } from "@/tool/websearch"
 import type { WaitTool } from "@/tool/wait"
 import type { HashTool } from "@/tool/hash"
 import type { NotifyTool } from "@/tool/notify"
+import type { OpenTool } from "@/tool/open"
 import type { AutomationTool } from "@/tool/automation"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
@@ -1584,6 +1585,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "notify"}>
           <Notify {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "open"}>
+          <Open {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "automation"}>
           <Automation {...toolprops} />
         </Match>
@@ -1987,6 +1991,8 @@ function Wait(props: ToolProps<typeof WaitTool>) {
   const seconds = createMemo(() => props.input.seconds ?? props.metadata.seconds)
   const reason = createMemo(() => props.input.reason ?? props.metadata.reason)
   const target = createMemo(() => props.input.until_file ?? props.metadata.target)
+  const textTarget = createMemo(() => props.input.until_text)
+  const pattern = createMemo(() => props.input.until_text_pattern ?? props.metadata.pattern)
   const url = createMemo(() => props.input.until_url ?? props.metadata.url)
   const pid = createMemo(() => props.input.until_pid_exit ?? props.metadata.pid)
   const label = createMemo(() => (typeof seconds() === "number" ? `${seconds()}s` : "delay"))
@@ -1996,6 +2002,9 @@ function Wait(props: ToolProps<typeof WaitTool>) {
       Wait {label()}
       <Show when={reason()}> - {reason()}</Show>
       <Show when={target()}> ({path.basename(String(target()))})</Show>
+      <Show when={textTarget() && pattern()}>
+        {" "}({path.basename(String(textTarget()))} ~/{String(pattern()).slice(0, 24)}/)
+      </Show>
       <Show when={url()}> [{String(url())}]</Show>
       <Show when={pid()}> [pid {String(pid())}]</Show>
     </InlineTool>
@@ -2028,6 +2037,27 @@ function Notify(props: ToolProps<typeof NotifyTool>) {
     <InlineTool icon="!" pending="Notifying..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
       <Show when={delivered() === false} fallback={<>Notify [{urgency()}] {title()}</>}>
         Notify [{urgency()}] {title()} (not delivered)
+      </Show>
+    </InlineTool>
+  )
+}
+
+function Open(props: ToolProps<typeof OpenTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const target = createMemo(() => props.input.target ?? "")
+  const kind = createMemo(() => props.metadata.kind ?? "target")
+  const reveal = createMemo(() => props.input.reveal_in_folder ?? props.metadata.reveal_in_folder)
+  const delivered = createMemo(() => props.metadata.delivered)
+  const label = createMemo(() => {
+    const t = String(target())
+    if (kind() === "url") return t.length > 60 ? t.slice(0, 57) + "..." : t
+    return path.basename(t)
+  })
+
+  return (
+    <InlineTool icon="⤢" pending="Opening..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      <Show when={delivered() === false} fallback={<>Open {kind()} {label()}{reveal() ? " (reveal)" : ""}</>}>
+        Open {kind()} {label()} (failed)
       </Show>
     </InlineTool>
   )

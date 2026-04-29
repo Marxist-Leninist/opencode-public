@@ -275,6 +275,10 @@ function launcherPath() {
   return path.join(Global.Path.home, ".opencode", "bin", "opencode-sg.cmd")
 }
 
+function timestampCommand() {
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Get-Date -Format yyyyMMdd-HHmmss"`
+}
+
 function buildRunnerScript(def: AutomationDefinition) {
   const args = [
     "run",
@@ -284,8 +288,9 @@ function buildRunnerScript(def: AutomationDefinition) {
     ...(def.agent ? ["--agent", cmdQuote(def.agent)] : []),
   ]
 
-  // Build a sortable timestamp via wmic so log files are chronologically named
-  // even on locales where %date% / %time% format differs.
+  // Build a sortable timestamp without WMIC. Recent Windows installs often do
+  // not include wmic.exe, which made every automation log collide at
+  // 00000000-000000 and produced malformed history rows.
   return [
     "@echo off",
     "setlocal enabledelayedexpansion",
@@ -295,25 +300,44 @@ function buildRunnerScript(def: AutomationDefinition) {
     `cd /d ${cmdQuote(def.working_directory)}`,
     `if not exist ${cmdQuote(def.log_dir)} mkdir ${cmdQuote(def.log_dir)}`,
     `if not exist ${cmdQuote(path.dirname(def.history_path))} mkdir ${cmdQuote(path.dirname(def.history_path))}`,
-    `for /f "usebackq tokens=2 delims==" %%a in (\`wmic os get localdatetime /value 2^>nul ^| find "="\`) do set _LDT=%%a`,
-    "if not defined _LDT set _LDT=00000000000000.000000+000",
-    "set TS=!_LDT:~0,8!-!_LDT:~8,6!",
-    `set LOG=${cmdQuote(`${def.log_dir}\\!TS!.log`)}`,
-    `set HIST=${cmdQuote(def.history_path)}`,
-    "set START_MS=!_LDT:~14,3!",
-    "set START_SECS=!_LDT:~12,2!",
-    `> %LOG% echo === SG OpenCode automation: ${def.id} (!TS!) ===`,
-    `>> %LOG% echo cwd: ${def.working_directory}`,
-    `>> %LOG% echo title: ${def.title}`,
-    "echo. >> %LOG%",
-    `type ${cmdQuote(def.prompt_path)} | call ${cmdQuote(launcherPath())} ${args.join(" ")} 1>> %LOG% 2>&1`,
+    `for /f "delims=" %%a in ('${timestampCommand()}') do set "TS=%%a"`,
+    "if not defined TS set \"TS=00000000-000000\"",
+    `set "LOG=${def.log_dir}\\!TS!.log"`,
+    `set "HIST=${def.history_path}"`,
+    `> "!LOG!" echo === SG OpenCode automation: ${def.id} (!TS!) ===`,
+    `>> "!LOG!" echo cwd: ${def.working_directory}`,
+    `>> "!LOG!" echo title: ${def.title}`,
+    "echo. >> \"!LOG!\"",
+    `type ${cmdQuote(def.prompt_path)} | call ${cmdQuote(launcherPath())} ${args.join(" ")} 1>> "!LOG!" 2>&1`,
     "set EXITCODE=!errorlevel!",
-    `for /f "usebackq tokens=2 delims==" %%a in (\`wmic os get localdatetime /value 2^>nul ^| find "="\`) do set _LDT2=%%a`,
-    "set END_TS=!_LDT2:~0,8!-!_LDT2:~8,6!",
-    "echo. >> %LOG%",
-    `>> %LOG% echo === end (exit !EXITCODE!) at !END_TS! ===`,
-    `>> %HIST% echo {"id":"${def.id}","ts":"!TS!","exit":!EXITCODE!,"log":%LOG%,"end_ts":"!END_TS!"}`,
+    `for /f "delims=" %%a in ('${timestampCommand()}') do set "END_TS=%%a"`,
+    "if not defined END_TS set \"END_TS=!TS!\"",
+    "echo. >> \"!LOG!\"",
+    `>> "!LOG!" echo === end (exit !EXITCODE!) at !END_TS! ===`,
+    "set \"LOG_JSON=!LOG:\\=\\\\!\"",
+    `>> "!HIST!" echo {"id":"${def.id}","ts":"!TS!","exit":!EXITCODE!,"log":"!LOG_JSON!","end_ts":"!END_TS!"}`,
     "endlocal & exit /b %EXITCODE%",
+    "",
+  ].join("\r\n")
+}
+
+// Sibling .vbs wrapper for the .cmd runner. Windows Task Scheduler invokes
+// this via `wscript.exe` so the .cmd does not flash a console window (cmd is
+// launched with SW_HIDE). The wrapper waits for the cmd to exit so Task
+// Scheduler's Running/Last Result state reflects the real automation run.
+function vbsPath(scriptPath: string) {
+  return scriptPath.replace(/\.cmd$/i, ".vbs")
+}
+
+function buildVbsLauncher(scriptPath: string) {
+  // Triple double-quotes in VBS = a single literal double-quote.
+  const vbsQuoted = `""${scriptPath.replace(/"/g, '""')}""`
+  return [
+    "' SG OpenCode automation launcher (auto-generated)",
+    "' Runs the sibling .cmd hidden so users don't see a terminal flash.",
+    `Dim WShell`,
+    `Set WShell = CreateObject("WScript.Shell")`,
+    `WShell.Run "${vbsQuoted}", 0, True`,
     "",
   ].join("\r\n")
 }
@@ -322,11 +346,15 @@ async function writeDefinition(def: AutomationDefinition) {
   await ensureDirs()
   await fs.writeFile(def.prompt_path, def.prompt, "utf8")
   await fs.writeFile(def.script_path, buildRunnerScript(def), "utf8")
+  await fs.writeFile(vbsPath(def.script_path), buildVbsLauncher(def.script_path), "utf8")
   await fs.writeFile(def.definition_path, JSON.stringify(def, null, 2), "utf8")
 }
 
 function schtasksCreateArgs(def: AutomationDefinition) {
-  const args = ["/Create", "/TN", def.task_name, "/TR", cmdQuote(def.script_path), "/F"]
+  // /TR points at the wscript wrapper instead of the .cmd directly so
+  // Windows Task Scheduler launches us with no visible console window.
+  const tr = `wscript.exe ${cmdQuote(vbsPath(def.script_path))}`
+  const args = ["/Create", "/TN", def.task_name, "/TR", tr, "/F"]
   if (def.schedule === "every_minutes") {
     args.push("/SC", "MINUTE", "/MO", String(def.interval_minutes ?? 1))
     return args
@@ -616,6 +644,7 @@ export const AutomationTool = Tool.define(
             await fs.rm(def.definition_path, { force: true })
             await fs.rm(def.prompt_path, { force: true })
             await fs.rm(def.script_path, { force: true })
+            await fs.rm(vbsPath(def.script_path), { force: true })
             await fs.rm(def.log_dir ?? logDir(id), { recursive: true, force: true })
             await fs.rm(def.history_path ?? historyPath(id), { force: true })
           })
@@ -783,4 +812,6 @@ export const __testing = {
   pruneLogs,
   findLogPath,
   tailFile,
+  vbsPath,
+  buildVbsLauncher,
 }

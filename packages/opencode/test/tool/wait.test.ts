@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import * as fs from "fs/promises"
 import * as nodePath from "path"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Agent } from "../../src/agent/agent"
@@ -220,6 +220,91 @@ describe("tool.wait", () => {
         expect(result.metadata.mode).toBe("until_pid_exit")
         expect(result.metadata.exited).toBe(true)
         expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(1)
+      }),
+    ),
+  )
+
+  it.live("returns early when until_text pattern matches", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const target = nodePath.join(dir, "build.log")
+        yield* Effect.promise(() => fs.writeFile(target, "starting...\n"))
+        const timer = setTimeout(() => {
+          void fs.appendFile(target, "BUILD SUCCESSFUL in 2s\n").catch(() => undefined)
+        }, 200)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            clearTimeout(timer)
+          }),
+        )
+
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 3,
+            reason: "wait for build success",
+            until_text: "build.log",
+            until_text_pattern: "BUILD SUCCESSFUL",
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_text")
+        expect(result.metadata.matched).toBe(true)
+        expect(result.metadata.match).toContain("BUILD SUCCESSFUL")
+        expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(2)
+      }),
+    ),
+  )
+
+  it.live("times out when until_text pattern never matches", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const target = nodePath.join(dir, "noisy.log")
+        yield* Effect.promise(() => fs.writeFile(target, "irrelevant chatter\n"))
+
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 1,
+            reason: "expect missing pattern",
+            until_text: "noisy.log",
+            until_text_pattern: "BUILD FAILED",
+            poll_interval_ms: 100,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_text")
+        expect(result.metadata.matched).toBeFalsy()
+        expect(result.metadata.timed_out).toBe(true)
+      }),
+    ),
+  )
+
+  it.live("rejects until_text without until_text_pattern", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const exit = yield* Effect.exit(
+          tool.execute(
+            {
+              seconds: 2,
+              reason: "incomplete params",
+              until_text: "any.log",
+              poll_interval_ms: 100,
+            },
+            baseCtx,
+          ),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.pretty(exit.cause)).toContain("until_text_pattern")
+        }
       }),
     ),
   )

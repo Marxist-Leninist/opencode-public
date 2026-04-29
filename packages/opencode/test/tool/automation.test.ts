@@ -50,7 +50,7 @@ describe("tool.automation", () => {
         "/TN",
         "\\OpenCode SG\\daily-repo-check",
         "/TR",
-        '"C:\\state\\daily-repo-check.cmd"',
+        'wscript.exe "C:\\state\\daily-repo-check.vbs"',
         "/F",
         "/SC",
         "DAILY",
@@ -85,7 +85,7 @@ describe("tool.automation", () => {
         "/TN",
         "\\OpenCode SG\\weekly-standup",
         "/TR",
-        '"C:\\state\\weekly-standup.cmd"',
+        'wscript.exe "C:\\state\\weekly-standup.vbs"',
         "/F",
         "/SC",
         "WEEKLY",
@@ -120,12 +120,24 @@ describe("tool.automation", () => {
       expect(script).toContain("setlocal enabledelayedexpansion")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_RUN=1")
       expect(script).toContain("OPENCODE_SG_AUTOMATION_ID=demo")
-      expect(script).toContain("wmic os get localdatetime")
-      expect(script).toContain("1>> %LOG% 2>&1")
+      expect(script).toContain("Get-Date -Format yyyyMMdd-HHmmss")
+      expect(script).toContain('set "LOG=C:\\state\\logs\\demo\\!TS!.log"')
+      expect(script).toContain('1>> "!LOG!" 2>&1')
+      expect(script).toContain('set "LOG_JSON=!LOG:\\=\\\\!"')
       expect(script).toContain('"id":"demo"')
-      expect(script).toContain(">> %HIST%")
+      expect(script).toContain('"log":"!LOG_JSON!"')
+      expect(script).toContain('>> "!HIST!"')
       expect(script).toContain('mkdir "C:\\state\\logs\\demo"')
       expect(script).toContain('mkdir "C:\\state\\history"')
+    }),
+  )
+
+  it.effect("builds a hidden VBS launcher for scheduled tasks", () =>
+    Effect.sync(() => {
+      expect(__testing.vbsPath("C:\\state\\demo.cmd")).toBe("C:\\state\\demo.vbs")
+      const launcher = __testing.buildVbsLauncher("C:\\state\\demo.cmd")
+      expect(launcher).toContain("WScript.Shell")
+      expect(launcher).toContain('WShell.Run """C:\\state\\demo.cmd""", 0, True')
     }),
   )
 

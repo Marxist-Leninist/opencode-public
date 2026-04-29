@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useSDK } from "@/context/sdk"
+import { useLocal } from "@/context/local"
 
 type Schedule = "every_minutes" | "hourly" | "daily" | "weekly"
 type Weekday = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN"
@@ -35,6 +36,17 @@ type ToolResult = {
   title: string
   output: string
   metadata?: Record<string, unknown>
+}
+
+type RawSdkClient = {
+  request<T>(options: {
+    method: string
+    url: string
+    body?: unknown
+    parseAs: "json"
+    responseStyle: "data"
+    throwOnError: true
+  }): Promise<T>
 }
 
 type FormState = {
@@ -70,6 +82,18 @@ function scheduleText(item: AutomationDefinition) {
 
 export default function AutomationsPage() {
   const sdk = useSDK()
+  const local = useLocal()
+  const modelOptions = createMemo(() =>
+    local.model
+      .list()
+      .filter((m) => local.model.visible({ modelID: m.id, providerID: m.provider.id }))
+      .map((m) => ({
+        value: `${m.provider.id}/${m.id}`,
+        label: `${m.provider.name} / ${m.name}`,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  )
+  const agentOptions = createMemo(() => local.agent.list().map((a) => a.name).sort((a, b) => a.localeCompare(b)))
   const [selected, setSelected] = createSignal<string | undefined>()
   const [busy, setBusy] = createSignal<string | undefined>()
   const [output, setOutput] = createSignal("")
@@ -89,25 +113,20 @@ export default function AutomationsPage() {
   })
 
   const [form, setForm] = createStore<FormState>(emptyForm())
+  const modelKnown = createMemo(() => !form.model || modelOptions().some((item) => item.value === form.model))
+  const agentKnown = createMemo(() => !form.agent || agentOptions().includes(form.agent))
 
-  const url = (path = "") => {
-    const next = new URL(`/automation${path}`, sdk.url)
-    next.searchParams.set("directory", sdk.directory)
-    return next.toString()
-  }
+  const rawClient = () => (sdk.client as unknown as { client: RawSdkClient }).client
 
-  async function request<T>(path = "", init?: RequestInit): Promise<T> {
-    const headers = new Headers(init?.headers)
-    headers.set("content-type", "application/json")
-    const res = await fetch(url(path), {
-      ...init,
-      headers,
+  async function request<T>(path = "", init?: { method?: string; body?: unknown }): Promise<T> {
+    return rawClient().request<T>({
+      method: init?.method ?? "GET",
+      url: `/automation${path}`,
+      body: init?.body,
+      parseAs: "json",
+      responseStyle: "data",
+      throwOnError: true,
     })
-    if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText)
-      throw new Error(text || res.statusText)
-    }
-    return (await res.json()) as T
   }
 
   const [items, itemsActions] = createResource(() => request<AutomationDefinition[]>())
@@ -158,7 +177,7 @@ export default function AutomationsPage() {
         enabled: form.enabled,
         install: true,
       }
-      const result = await request<ToolResult>("", { method: "POST", body: JSON.stringify(body) })
+      const result = await request<ToolResult>("", { method: "POST", body })
       setOutput(result.output)
       await itemsActions.refetch()
       showToast({ variant: "success", title: result.title })
@@ -178,7 +197,7 @@ export default function AutomationsPage() {
     try {
       const result = await request<ToolResult>(`/${encodeURIComponent(item.id)}/${action}`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: {},
       })
       setOutput(result.output)
       await itemsActions.refetch()
@@ -271,7 +290,7 @@ export default function AutomationsPage() {
                           <button type="button" class="min-w-0 flex-1 text-left" onClick={() => edit(item)}>
                             <div class="truncate text-14-medium text-text-strong">{item.title}</div>
                             <div class="mt-0.5 truncate text-13-regular text-text-base">
-                              {scheduleText(item)} · {item.enabled ? "Enabled" : "Paused"}
+                              {scheduleText(item)} - {item.enabled ? "Enabled" : "Paused"}
                             </div>
                           </button>
                           <span
@@ -426,21 +445,35 @@ export default function AutomationsPage() {
                 <div class="grid grid-cols-2 gap-3">
                   <label class={labelClass}>
                     Model
-                    <input
+                    <select
                       class={inputClass}
                       value={form.model}
                       onInput={(event) => setForm("model", event.currentTarget.value)}
-                      placeholder="default"
-                    />
+                    >
+                      <option value="">Default model</option>
+                      <Show when={!modelKnown()}>
+                        <option value={form.model}>Custom: {form.model}</option>
+                      </Show>
+                      <For each={modelOptions()}>
+                        {(opt) => <option value={opt.value}>{opt.label}</option>}
+                      </For>
+                    </select>
                   </label>
                   <label class={labelClass}>
                     Agent
-                    <input
+                    <select
                       class={inputClass}
                       value={form.agent}
                       onInput={(event) => setForm("agent", event.currentTarget.value)}
-                      placeholder="build"
-                    />
+                    >
+                      <option value="">Default agent</option>
+                      <Show when={!agentKnown()}>
+                        <option value={form.agent}>Custom: {form.agent}</option>
+                      </Show>
+                      <For each={agentOptions()}>
+                        {(name) => <option value={name}>{name}</option>}
+                      </For>
+                    </select>
                   </label>
                 </div>
 

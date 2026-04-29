@@ -1,3 +1,4 @@
+import { open as fsOpen } from "node:fs/promises"
 import path from "path"
 import { Duration, Effect, Schema } from "effect"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -12,6 +13,8 @@ const MAX_POLL_INTERVAL_MS = 60_000
 const DEFAULT_STABLE_REQUIRED_MS = 10_000
 const MAX_STABLE_REQUIRED_MS = 600_000
 const DEFAULT_URL_TIMEOUT_MS = 10_000
+const DEFAULT_TEXT_TAIL_BYTES = 32_768
+const MAX_TEXT_TAIL_BYTES = 1_048_576
 
 export const Parameters = Schema.Struct({
   seconds: Schema.Number.check(Schema.isInt())
@@ -65,11 +68,30 @@ export const Parameters = Schema.Struct({
     description:
       "Optional process id. If provided, return early once the process is no longer running. Useful for waiting on a backgrounded shell command to finish.",
   }),
+  until_text: Schema.optional(Schema.String).annotate({
+    description:
+      "Optional file path to tail. If provided alongside until_text_pattern, the wait returns as soon as that pattern matches the tail of the file. Pairs well with bash backgrounded jobs that write to a log file.",
+  }),
+  until_text_pattern: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048))).annotate({
+    description:
+      "Optional regex (JavaScript flavour, no surrounding slashes) used with until_text. Matched against the last text_tail_bytes of the file. The match is case-sensitive; prefix with `(?i)` is NOT supported, use `[Aa][Bb]` style instead, or pass text_pattern_flags='i'.",
+  }),
+  text_pattern_flags: Schema.optional(Schema.String.check(Schema.isMaxLength(8))).annotate({
+    description:
+      "Optional regex flags for until_text_pattern, e.g. 'i' (case-insensitive), 'm' (multi-line), 's' (dotall). Defaults to 'm'.",
+  }),
+  text_tail_bytes: Schema.optional(
+    Schema.Number.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(256))
+      .check(Schema.isLessThanOrEqualTo(MAX_TEXT_TAIL_BYTES)),
+  ).annotate({
+    description: `Optional byte size of the file tail to test against until_text_pattern. Range 256-${MAX_TEXT_TAIL_BYTES}. Default ${DEFAULT_TEXT_TAIL_BYTES}.`,
+  }),
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit"
+type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit" | "until_text"
 
 type Metadata = {
   mode: WaitMode
@@ -94,6 +116,11 @@ type Metadata = {
   expected_status?: number
   pid?: number
   exited?: boolean
+  pattern?: string
+  pattern_flags?: string
+  text_tail_bytes?: number
+  matched?: boolean
+  match?: string
 }
 
 const abortable = <A, E, R>(
@@ -125,6 +152,33 @@ function isProcessAlive(pid: number) {
     // EPERM means it exists but we lack permission to signal it - still alive.
     return err?.code === "EPERM"
   }
+}
+
+async function readFileTail(filePath: string, maxBytes: number): Promise<string | undefined> {
+  try {
+    const fh = await fsOpen(filePath, "r")
+    try {
+      const stat = await fh.stat()
+      const size = Number(stat.size ?? 0)
+      const readBytes = Math.min(size, maxBytes)
+      if (readBytes <= 0) return ""
+      const buf = Buffer.alloc(readBytes)
+      const start = size - readBytes
+      await fh.read(buf, 0, readBytes, start)
+      return buf.toString("utf8")
+    } finally {
+      await fh.close().catch(() => undefined)
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function compilePattern(pattern: string, flags: string | undefined): RegExp {
+  const safeFlags = (flags ?? "m").replace(/[^gimsuy]/g, "")
+  // Always include 'm' so ^/$ work line-by-line by default.
+  const finalFlags = safeFlags.includes("m") ? safeFlags : safeFlags + "m"
+  return new RegExp(pattern, finalFlags)
 }
 
 async function probeUrl(url: string, signal: AbortSignal, timeoutMs: number) {
@@ -179,6 +233,131 @@ export const WaitTool = Tool.define(
                   Effect.catch(() => Effect.succeed(false)),
                 )
               : Effect.succeed(false)
+
+          if (params.until_text || params.until_text_pattern) {
+            if (!params.until_text || !params.until_text_pattern) {
+              throw new Error(
+                "wait: until_text and until_text_pattern must be provided together. until_text is the file path to tail; until_text_pattern is the regex to match.",
+              )
+            }
+            const tailBytes = params.text_tail_bytes ?? DEFAULT_TEXT_TAIL_BYTES
+            let regex: RegExp
+            try {
+              regex = compilePattern(params.until_text_pattern, params.text_pattern_flags)
+            } catch (err: unknown) {
+              throw new Error(`wait: until_text_pattern is not a valid regex: ${(err as Error).message}`)
+            }
+            const target = path.isAbsolute(params.until_text)
+              ? params.until_text
+              : path.resolve(ins.directory, params.until_text)
+
+            yield* ctx.metadata({
+              title: `wait up to ${params.seconds}s for /${regex.source}/ in ${path.basename(target)}`,
+              metadata: {
+                mode: "until_text",
+                target,
+                pattern: regex.source,
+                pattern_flags: regex.flags,
+                text_tail_bytes: tailBytes,
+                seconds: params.seconds,
+                reason: params.reason,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+              },
+            })
+
+            let aborted = false
+            let cancelledByFile = false
+            let pollCount = 0
+            let matched = false
+            let matchText: string | undefined
+            let lastTitleUpdate = start
+
+            while (Date.now() < deadline) {
+              if (yield* checkCancel()) {
+                cancelledByFile = true
+                break
+              }
+              pollCount++
+
+              const tail = yield* Effect.promise(() => readFileTail(target, tailBytes))
+              if (typeof tail === "string") {
+                const m = regex.exec(tail)
+                if (m) {
+                  matched = true
+                  matchText = m[0].slice(0, 200)
+                  break
+                }
+              }
+
+              const now = Date.now()
+              if (now - lastTitleUpdate >= 1000 && now < deadline) {
+                lastTitleUpdate = now
+                const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+                yield* ctx.metadata({
+                  title: `wait /${regex.source}/ in ${path.basename(target)} (${left}s left)`,
+                  metadata: {
+                    mode: "until_text",
+                    target,
+                    pattern: regex.source,
+                    pattern_flags: regex.flags,
+                    text_tail_bytes: tailBytes,
+                    seconds: params.seconds,
+                    reason: params.reason,
+                    elapsed_seconds: (now - start) / 1000,
+                    remaining_seconds: left,
+                    polls: pollCount,
+                    poll_interval_ms: pollIntervalMs,
+                    cancel_if_file: cancelTarget,
+                  },
+                })
+              }
+
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) break
+              const tick = yield* abortable(sleepMs(Math.min(pollIntervalMs, remaining)), ctx.abort)
+              if (tick === "__aborted__") {
+                aborted = true
+                break
+              }
+            }
+
+            const elapsed = (Date.now() - start) / 1000
+            return done({
+              title: matched
+                ? `${path.basename(target)} matched /${regex.source}/ after ${elapsed.toFixed(1)}s`
+                : cancelledByFile
+                  ? `wait cancelled by file after ${elapsed.toFixed(1)}s`
+                  : aborted
+                    ? `wait cancelled after ${elapsed.toFixed(1)}s`
+                    : `wait timed out after ${elapsed.toFixed(1)}s`,
+              metadata: {
+                mode: "until_text",
+                target,
+                pattern: regex.source,
+                pattern_flags: regex.flags,
+                text_tail_bytes: tailBytes,
+                seconds: params.seconds,
+                elapsed_seconds: elapsed,
+                polls: pollCount,
+                reason: params.reason,
+                matched,
+                match: matchText,
+                timed_out: !matched && !aborted && !cancelledByFile,
+                aborted,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+                cancelled_by_file: cancelledByFile,
+              },
+              output: matched
+                ? `Pattern /${regex.source}/${regex.flags} matched in ${target} after ${elapsed.toFixed(1)}s. First match: ${matchText}. Reason: ${params.reason}`
+                : cancelledByFile
+                  ? `Wait cancelled after ${elapsed.toFixed(1)}s because sentinel file exists: ${cancelTarget}. Reason: ${params.reason}`
+                  : aborted
+                    ? `Wait cancelled after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                    : `Timed out after ${elapsed.toFixed(1)}s waiting for /${regex.source}/${regex.flags} in ${target}. Reason: ${params.reason}`,
+            })
+          }
 
           if (params.until_url) {
             const expectedStatus = params.until_url_status ?? 200

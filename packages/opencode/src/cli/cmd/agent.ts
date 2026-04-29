@@ -28,6 +28,7 @@ const AVAILABLE_TOOLS = [
   "wait",
   "hash",
   "notify",
+  "open",
   "automation",
 ]
 
