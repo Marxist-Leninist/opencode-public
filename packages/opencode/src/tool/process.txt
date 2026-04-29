@@ -1,0 +1,31 @@
+List or kill OS processes by name pattern or PID.
+
+Use this when you need to check whether something is running (a build, a server, an editor) or terminate a hung process. Pairs well with the `wait` tool for "wait until X finishes" and `bash` for one-off shell work.
+
+Parameters:
+- `action` (required): one of:
+  - `list`: enumerate running processes matching `name_pattern` (or all if omitted).
+  - `kill`: terminate the process identified by `pid`.
+- `name_pattern` (optional): case-insensitive substring match against the process image name (e.g. "node", "OpenCode", "chrome"). Required-ish for `list` to keep output small; if omitted you get a top slice.
+- `pid` (optional): process ID to kill. Required for `kill`.
+- `force` (optional, default false): when true and action is `kill`, send SIGKILL / use `taskkill /F`. When false, send SIGTERM / `taskkill` (request a graceful exit).
+- `limit` (optional, default 50): max number of rows to return for `list` (1-500).
+
+Behavior:
+- Cross-platform:
+  - Windows: `tasklist` for list (CSV), `taskkill` for kill.
+  - macOS / Linux: `ps -eo pid,comm,pcpu,rss` for list, `kill` (or `kill -9`) for kill.
+- `list` returns metadata.processes as an array of { pid, name, cpu_percent?, rss_kb? }.
+- `kill` returns metadata.killed (boolean), metadata.exit_code (number?), and metadata.error (string?) on failure. Does NOT throw on missing PID — reports it.
+- Best-effort: if the platform tooling isn't available, the tool sets `delivered=false` and explains. Do not retry on failure.
+- Refuses to kill PID 0/1 (system processes) — agent must use `bash` for that.
+
+Examples:
+- List all bun processes: `{ "action": "list", "name_pattern": "bun" }`
+- List anything OpenCode-ish: `{ "action": "list", "name_pattern": "OpenCode" }`
+- Force-kill a hung PID: `{ "action": "kill", "pid": 12345, "force": true }`
+
+Do NOT use this tool to:
+- Kill processes you didn't start unless the user asked. Always confirm scope.
+- Implement health checks — use `sg_doctor` for SG integrations or `bash` curl for HTTP.
+- Repeatedly poll. If you want to "wait until X exits," use the `wait` tool with a check interval and a kill switch.

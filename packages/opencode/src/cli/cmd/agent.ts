@@ -34,6 +34,7 @@ const AVAILABLE_TOOLS = [
   "download",
   "sg_doctor",
   "screenshot",
+  "process",
 ]
 
 const AgentCreateCommand = cmd({

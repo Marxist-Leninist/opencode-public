@@ -21,6 +21,7 @@ import { AutomationTool } from "./automation"
 import { DownloadTool } from "./download"
 import { SgDoctorTool } from "./sg_doctor"
 import { ScreenshotTool } from "./screenshot"
+import { ProcessTool } from "./process"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -133,6 +134,7 @@ export const layer: Layer.Layer<
     const downloadtool = yield* DownloadTool
     const sgdoctortool = yield* SgDoctorTool
     const screenshottool = yield* ScreenshotTool
+    const processtool = yield* ProcessTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -231,6 +233,7 @@ export const layer: Layer.Layer<
           download: Tool.init(downloadtool),
           sg_doctor: Tool.init(sgdoctortool),
           screenshot: Tool.init(screenshottool),
+          process: Tool.init(processtool),
         })
 
         return {
@@ -260,6 +263,7 @@ export const layer: Layer.Layer<
             tool.download,
             tool.sg_doctor,
             tool.screenshot,
+            tool.process,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

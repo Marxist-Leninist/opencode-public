@@ -55,6 +55,7 @@ import type { AutomationTool } from "@/tool/automation"
 import type { DownloadTool } from "@/tool/download"
 import type { SgDoctorTool } from "@/tool/sg_doctor"
 import type { ScreenshotTool } from "@/tool/screenshot"
+import type { ProcessTool } from "@/tool/process"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -1607,6 +1608,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "screenshot"}>
           <Screenshot {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "process"}>
+          <ProcessDisplay {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -2160,6 +2164,34 @@ function Screenshot(props: ToolProps<typeof ScreenshotTool>) {
       <Show when={filePath()}> → {filePath()}</Show>
       <Show when={typeof bytes() === "number"}> ({bytes()} bytes)</Show>
       <Show when={delivered() === false}> (failed)</Show>
+    </InlineTool>
+  )
+}
+
+function ProcessDisplay(props: ToolProps<typeof ProcessTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const action = createMemo(() => props.input.action ?? props.metadata.action ?? "process")
+  const pattern = createMemo(() => props.input.name_pattern ?? props.metadata.name_pattern)
+  const matchCount = createMemo(() => props.metadata.match_count)
+  const total = createMemo(() => props.metadata.total_seen)
+  const pid = createMemo(() => props.input.pid ?? props.metadata.pid)
+  const killed = createMemo(() => props.metadata.killed)
+  const delivered = createMemo(() => props.metadata.delivered)
+
+  return (
+    <InlineTool icon="◎" pending="Inspecting..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      <Show when={action() === "list"} fallback={
+        <>
+          Process kill PID {pid()}
+          <Show when={killed() === true}> ✓</Show>
+          <Show when={killed() === false}> (failed)</Show>
+        </>
+      }>
+        Process list
+        <Show when={pattern()}> "{String(pattern())}"</Show>
+        <Show when={typeof matchCount() === "number"}> — {matchCount()}{typeof total() === "number" ? `/${total()}` : ""} matched</Show>
+        <Show when={delivered() === false}> (failed)</Show>
+      </Show>
     </InlineTool>
   )
 }
