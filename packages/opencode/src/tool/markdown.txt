@@ -1,0 +1,29 @@
+Parse and analyse Markdown without launching a browser or external converter — extract structure, links, code blocks, headings, or convert to plain text.
+
+Actions:
+
+- `outline`: list all headings in order with level + text. Optionally also slug + line number.
+- `links`: list every link `[text](href)` and reference-style link with text, href, and line.
+- `images`: list every image `![alt](src)` with alt + src + line.
+- `code_blocks`: list every fenced code block, with language tag and content. Inline code is ignored.
+- `headings`: alias of `outline` for clarity in callers.
+- `table_of_contents`: render a Markdown table of contents based on headings.
+- `to_plain`: strip Markdown formatting and return human-readable plain text. Code blocks are preserved as raw text.
+- `extract_section`: return the body of one heading, identified by exact text or slug, including its sub-sections until the next heading at the same or higher level.
+- `stats`: word count, line count, link count, code-block count, heading count.
+
+Common parameters:
+
+- `content`: inline Markdown. Required if `filePath` is not given.
+- `filePath`: read input from this file. Absolute or project-relative.
+- `output_path`: write the result to a file instead of returning inline.
+- `slug`: for `extract_section`, the kebab-case slug to extract.
+- `heading_text`: alternative to slug — match heading by exact text (case-insensitive).
+- `include_line_numbers`: for `outline`/`links`/`images`/`code_blocks`, include 1-based line numbers in metadata. Default true.
+- `format`: `text` (default) or `json` for structured output.
+
+Notes:
+
+- Parser is a forgiving subset of CommonMark. Setext headings (`===`, `---`), ATX headings (`# foo`), fenced code blocks, and standard inline links/images are recognised.
+- HTML-only Markdown is left as-is in `to_plain` (no full HTML stripping).
+- For very rigorous Markdown→HTML conversion, prefer a dedicated tool — this is for inspection and lightweight munging.

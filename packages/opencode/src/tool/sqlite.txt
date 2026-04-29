@@ -1,0 +1,28 @@
+Run SQLite queries against a local .sqlite/.db/.sqlite3 file without spawning the sqlite3 CLI, returning rows as structured JSON.
+
+Actions:
+
+- `query`: run an arbitrary SELECT/PRAGMA statement. The first sentence of the SQL must be a read-only statement (SELECT, WITH, EXPLAIN, PRAGMA). Returns rows + columns.
+- `tables`: list every user table and view in the database, with row counts.
+- `schema`: return the CREATE statement(s) for one specific table, or for the whole database if `table` is omitted.
+- `columns`: list columns of a single table — name, declared type, NOT NULL flag, default, primary-key index. Equivalent to `PRAGMA table_info`.
+- `info`: return one-shot stats — file size, page count, page size, journal mode, application_id, user_version, list of tables.
+- `exec`: run an arbitrary statement, including INSERT/UPDATE/DELETE/CREATE/DROP. Disabled by default. Pass `write_mode: true` to enable. Multiple statements separated by `;` are supported.
+
+Common parameters:
+
+- `path` (required): absolute or project-relative path to the SQLite file.
+- `sql`: SQL text. Required for `query` and `exec`.
+- `params`: array of positional parameters for `?` placeholders, or a JSON object for `:name`/`@name`/`$name` placeholders. Optional.
+- `table`: table name. Required for `columns`, optional for `schema`.
+- `limit`: row cap for `query`. Default 200, max 5000.
+- `offset`: row offset for `query`. Default 0.
+- `format`: `json` (default) or `csv`.
+- `write_mode`: must be true for `exec`. Default false.
+- `timeout_ms`: SQLite busy timeout. Default 5000, max 60000.
+
+Notes:
+
+- The database is opened read-only unless `write_mode: true`. WAL files next to the database stay untouched.
+- Output is automatically truncated. Large BLOBs are summarised as `<blob N bytes>`.
+- Use this when you would otherwise shell out to `sqlite3 db.sqlite "SELECT ..."` — it is faster and returns structured rows that you can JSON-walk.

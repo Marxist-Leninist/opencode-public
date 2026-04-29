@@ -42,6 +42,8 @@ import { MathTool } from "./math"
 import { RandomTool } from "./random"
 import { XmlTool } from "./xml"
 import { TemplateTool } from "./template"
+import { SqliteTool } from "./sqlite"
+import { MarkdownTool } from "./markdown"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -175,6 +177,8 @@ export const layer: Layer.Layer<
     const randomtool = yield* RandomTool
     const xmltool = yield* XmlTool
     const templatetool = yield* TemplateTool
+    const sqlitetool = yield* SqliteTool
+    const markdowntool = yield* MarkdownTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -294,6 +298,8 @@ export const layer: Layer.Layer<
           random: Tool.init(randomtool),
           xml: Tool.init(xmltool),
           template: Tool.init(templatetool),
+          sqlite: Tool.init(sqlitetool),
+          markdown: Tool.init(markdowntool),
         })
 
         return {
@@ -344,6 +350,8 @@ export const layer: Layer.Layer<
             tool.random,
             tool.xml,
             tool.template,
+            tool.sqlite,
+            tool.markdown,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
