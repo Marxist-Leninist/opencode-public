@@ -19,6 +19,7 @@ import { WorkspaceRoutes } from "./routes/control/workspace"
 import { ExperimentalHttpApiServer } from "./routes/instance/httpapi/server"
 import { WorkspacePaths } from "./routes/instance/httpapi/workspace"
 import { Context } from "effect"
+import * as NativeScheduler from "@/automation/native-scheduler"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -111,6 +112,11 @@ export async function listen(opts: {
 }): Promise<Listener> {
   const built = create(opts)
   const server = await built.runtime.listen(opts)
+
+  // Start the in-process automation scheduler so paused/enabled state is
+  // honored without depending on Windows Task Scheduler. Failures here must
+  // not prevent the sidecar from listening, hence the catch.
+  void NativeScheduler.start().catch((err) => log.warn("NativeScheduler.start failed", { err: String(err) }))
 
   const next = new URL("http://localhost")
   next.hostname = opts.hostname
