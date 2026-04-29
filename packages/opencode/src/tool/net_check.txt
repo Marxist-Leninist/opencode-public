@@ -1,0 +1,32 @@
+Quick low-level network probe: DNS lookup, TCP connect, or HTTP HEAD/GET — without the noise of running curl/dig from bash.
+
+Use cases:
+- "Is doxx.lat reachable?" → `mode=http`.
+- "Does port 22 on 5.75.217.57 accept connections?" → `mode=tcp`.
+- "What does this hostname resolve to?" → `mode=dns`.
+- Quick sanity check before queuing up a long download or remote_exec.
+
+Modes:
+- `dns`: resolve a hostname. Returns A and AAAA records (IPv4 + IPv6).
+- `tcp`: open a TCP connection to host:port and immediately close. Reports connect latency.
+- `http`: HEAD-then-GET against a URL. Reports status, server header, content-length, and total time.
+
+Inputs:
+- `mode`: required. `dns`, `tcp`, or `http`.
+- `host`: hostname for `dns`/`tcp`. Mutually exclusive with `url`.
+- `port`: required for `tcp`. 1-65535.
+- `url`: full URL for `http`. e.g. `https://doxx.lat/`. Must be http or https.
+- `method`: HTTP method for `http`. `HEAD` (default) or `GET`. GET reads up to ~32 KB.
+- `timeout_ms`: per-attempt timeout. Default 5000, max 60000.
+- `expect_status`: optional integer; sets metadata.matches based on response status.
+- `expect_substring`: optional substring; if `mode=http` + `method=GET`, sets metadata.body_matches.
+
+Returns:
+- `dns`: `{ host, addresses: [{ kind: "A"|"AAAA", value }], elapsed_ms }`
+- `tcp`: `{ host, port, connected, latency_ms, error? }`
+- `http`: `{ url, status, status_text, server, content_type, content_length, headers, body_preview?, total_ms, matches?, body_matches? }`
+
+Notes:
+- Read-only (no body upload, no auth). For authenticated calls use the webfetch or fetch_url MCP tool.
+- Honors abort signal — cancel via Ctrl+C or task cancel.
+- Treats network-layer errors (timeout, ENOTFOUND, ECONNREFUSED) as a non-throwing result with `error` populated, so the agent can branch.

@@ -4,12 +4,14 @@ import { Config } from "../config"
 import DESCRIPTION from "./sg_doctor.txt"
 import * as Tool from "./tool"
 
-const TARGETS = ["ring", "ring_multimodal", "sg1", "sg2", "scheduler"] as const
+const TARGETS = ["ring", "ring_multimodal", "sg1", "sg2", "scheduler", "deepseek", "openrouter"] as const
 type Target = (typeof TARGETS)[number]
 
 const DEFAULT_RING_BASE = "https://doxx.lat/ring/v1"
 const DEFAULT_SG1_URL = "https://doxx.lat/mcp/sse"
 const DEFAULT_SG2_URL = "https://mcp2.doxx.lat/mcp/sse"
+const DEFAULT_DEEPSEEK_BASE = "https://api.deepseek.com"
+const DEFAULT_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 const DEFAULT_TIMEOUT_MS = 8_000
 
 export const Parameters = Schema.Struct({
@@ -28,6 +30,18 @@ export const Parameters = Schema.Struct({
   }),
   sg2_url: Schema.optional(Schema.String).annotate({
     description: "Override SG2 MCP URL. Default https://mcp2.doxx.lat/mcp/sse",
+  }),
+  deepseek_base_url: Schema.optional(Schema.String).annotate({
+    description: "Override DeepSeek API base URL. Default https://api.deepseek.com",
+  }),
+  deepseek_api_key: Schema.optional(Schema.String).annotate({
+    description: "Override DeepSeek bearer token. Falls back to provider.deepseek.options.apiKey from config.",
+  }),
+  openrouter_base_url: Schema.optional(Schema.String).annotate({
+    description: "Override OpenRouter API base URL. Default https://openrouter.ai/api/v1",
+  }),
+  openrouter_api_key: Schema.optional(Schema.String).annotate({
+    description: "Override OpenRouter bearer token. Falls back to provider.openrouter.options.apiKey from config.",
   }),
   timeout_ms: Schema.optional(
     Schema.Number.check(Schema.isInt())
@@ -55,6 +69,8 @@ type Metadata = {
   ring_base_url?: string
   sg1_url?: string
   sg2_url?: string
+  deepseek_base_url?: string
+  openrouter_base_url?: string
   timeout_ms: number
 }
 
@@ -259,6 +275,63 @@ async function probeMcp(target: "sg1" | "sg2", url: string, timeoutMs: number): 
   }
 }
 
+async function probeOpenAiCompatibleModels(
+  target: "deepseek" | "openrouter",
+  baseUrl: string,
+  key: string | undefined,
+  timeoutMs: number,
+  expectedModelHint?: string,
+): Promise<ProbeResult> {
+  if (!key) {
+    return {
+      target,
+      ok: false,
+      detail: `no API key (set provider.${target}.options.apiKey or pass ${target}_api_key)`,
+    }
+  }
+  const url = `${baseUrl.replace(/\/+$/, "")}/models`
+  const r = await timedFetch(
+    url,
+    { method: "GET", headers: { Authorization: `Bearer ${key}` } },
+    timeoutMs,
+  )
+  if (!r.res) {
+    return { target, ok: false, latency_ms: r.latency_ms, detail: r.error ?? "unreachable" }
+  }
+  if (!r.res.ok) {
+    let body = ""
+    try {
+      body = (await r.res.text()).slice(0, 200)
+    } catch {}
+    return {
+      target,
+      ok: false,
+      status: r.res.status,
+      latency_ms: r.latency_ms,
+      detail: `HTTP ${r.res.status} ${r.res.statusText} ${body}`.trim(),
+    }
+  }
+  let count = 0
+  let hintFound = false
+  try {
+    const json: any = await r.res.json()
+    const list = Array.isArray(json?.data) ? json.data : []
+    count = list.length
+    if (expectedModelHint) {
+      hintFound = list.some((m: any) => typeof m?.id === "string" && m.id.includes(expectedModelHint))
+    }
+  } catch {}
+  return {
+    target,
+    ok: count > 0,
+    status: r.res.status,
+    latency_ms: r.latency_ms,
+    detail: count
+      ? `${count} models listed${expectedModelHint ? ` (${expectedModelHint}: ${hintFound ? "yes" : "no"})` : ""}`
+      : "models endpoint reachable but list empty",
+  }
+}
+
 async function probeScheduler(cfg: any): Promise<ProbeResult> {
   const sched = cfg?.mcp?.["sg-scheduler"]
   if (!sched || sched.type !== "local" || !Array.isArray(sched.command) || sched.command.length === 0) {
@@ -313,6 +386,20 @@ export const SgDoctorTool = Tool.define(
             params.ring_api_key ?? (cfg?.provider?.["sg-ring"]?.options?.apiKey as string | undefined) ?? undefined
           const sg1Url = params.sg1_url ?? (cfg?.mcp?.sg1?.url as string | undefined) ?? DEFAULT_SG1_URL
           const sg2Url = params.sg2_url ?? (cfg?.mcp?.sg2?.url as string | undefined) ?? DEFAULT_SG2_URL
+          const deepseekBaseUrl =
+            params.deepseek_base_url ??
+            (cfg?.provider?.deepseek?.options?.baseURL as string | undefined) ??
+            DEFAULT_DEEPSEEK_BASE
+          const deepseekKey =
+            params.deepseek_api_key ?? (cfg?.provider?.deepseek?.options?.apiKey as string | undefined) ?? undefined
+          const openrouterBaseUrl =
+            params.openrouter_base_url ??
+            (cfg?.provider?.openrouter?.options?.baseURL as string | undefined) ??
+            DEFAULT_OPENROUTER_BASE
+          const openrouterKey =
+            params.openrouter_api_key ??
+            (cfg?.provider?.openrouter?.options?.apiKey as string | undefined) ??
+            undefined
 
           yield* ctx.metadata({
             title: `sg_doctor probing ${targets.join(", ")}`,
@@ -323,6 +410,8 @@ export const SgDoctorTool = Tool.define(
               ring_base_url: ringBaseUrl,
               sg1_url: sg1Url,
               sg2_url: sg2Url,
+              deepseek_base_url: deepseekBaseUrl,
+              openrouter_base_url: openrouterBaseUrl,
               timeout_ms: timeoutMs,
             },
           })
@@ -336,6 +425,10 @@ export const SgDoctorTool = Tool.define(
             if (include.has("sg1")) tasks.push(probeMcp("sg1", sg1Url, timeoutMs))
             if (include.has("sg2")) tasks.push(probeMcp("sg2", sg2Url, timeoutMs))
             if (include.has("scheduler")) tasks.push(probeScheduler(cfg))
+            if (include.has("deepseek"))
+              tasks.push(probeOpenAiCompatibleModels("deepseek", deepseekBaseUrl, deepseekKey, timeoutMs, "deepseek"))
+            if (include.has("openrouter"))
+              tasks.push(probeOpenAiCompatibleModels("openrouter", openrouterBaseUrl, openrouterKey, timeoutMs))
             return await Promise.all(tasks)
           })
 
@@ -360,6 +453,8 @@ export const SgDoctorTool = Tool.define(
               ring_base_url: ringBaseUrl,
               sg1_url: sg1Url,
               sg2_url: sg2Url,
+              deepseek_base_url: deepseekBaseUrl,
+              openrouter_base_url: openrouterBaseUrl,
               timeout_ms: timeoutMs,
             },
             output: [`SG health check (timeout=${timeoutMs}ms):`, ...lines, ok ? "All probed targets are healthy." : "One or more probes failed; see above."].join(
@@ -371,4 +466,10 @@ export const SgDoctorTool = Tool.define(
   }),
 )
 
-export const __testing = { probeRing, probeRingMultimodal, probeMcp, probeScheduler }
+export const __testing = {
+  probeRing,
+  probeRingMultimodal,
+  probeMcp,
+  probeScheduler,
+  probeOpenAiCompatibleModels,
+}

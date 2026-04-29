@@ -1,0 +1,34 @@
+Inspect filesystem disk usage — free/total space per drive, or the size of a directory tree.
+
+Use cases:
+- Before launching a multi-GB download or installer, confirm there is enough free space on the target drive.
+- Diagnose "disk full" errors by listing all volumes and their free/total bytes.
+- Measure how much disk a directory is consuming (recursive size with file count and largest entries).
+
+Actions:
+- `volumes` (default): list mounted volumes with capacity and free space.
+  - On Windows uses `wmic logicaldisk` (falls back to PowerShell `Get-PSDrive`).
+  - On macOS / Linux uses `df -kP`.
+- `path`: report the volume backing a given absolute path with its free/total/used bytes.
+  - Useful before writing/downloading to a specific path.
+- `usage`: walk a directory tree and total file bytes, file count, and the top-N largest files.
+  - `path` is required. `max_depth` (default 6) and `top_n` (default 5) cap work.
+  - Stops early on `abort` so the agent can interrupt long walks.
+
+Inputs:
+- `action`: one of `volumes`, `path`, `usage`. Default `volumes`.
+- `path`: absolute filesystem path. Required for `path` and `usage`.
+- `top_n`: how many largest files to surface in `usage`. Default 5, max 50.
+- `max_depth`: recursion cap for `usage`. Default 6, max 32.
+
+Returns one of:
+- `volumes`: `{ volumes: [{ mount, total_bytes, free_bytes, used_bytes, percent_used, fs_type? }] }`.
+- `path`: `{ mount, total_bytes, free_bytes, used_bytes, percent_used, would_fit_bytes }`.
+- `usage`: `{ path, total_bytes, file_count, dir_count, top: [{ path, size_bytes }], truncated }`.
+
+All sizes are bytes. The text output also formats them as MB/GB for human readability.
+
+Notes:
+- Read-only — no path is created, deleted, or modified.
+- The `usage` walker skips junctions/symlinks to avoid double-counting and infinite loops.
+- Errors per-entry (e.g. EPERM on a system folder) are skipped silently; metadata.errors counts them.

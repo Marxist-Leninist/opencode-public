@@ -22,6 +22,8 @@ import { DownloadTool } from "./download"
 import { SgDoctorTool } from "./sg_doctor"
 import { ScreenshotTool } from "./screenshot"
 import { ProcessTool } from "./process"
+import { DiskTool } from "./disk"
+import { NetCheckTool } from "./net_check"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -135,6 +137,8 @@ export const layer: Layer.Layer<
     const sgdoctortool = yield* SgDoctorTool
     const screenshottool = yield* ScreenshotTool
     const processtool = yield* ProcessTool
+    const disktool = yield* DiskTool
+    const netchecktool = yield* NetCheckTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -234,6 +238,8 @@ export const layer: Layer.Layer<
           sg_doctor: Tool.init(sgdoctortool),
           screenshot: Tool.init(screenshottool),
           process: Tool.init(processtool),
+          disk: Tool.init(disktool),
+          net_check: Tool.init(netchecktool),
         })
 
         return {
@@ -264,6 +270,8 @@ export const layer: Layer.Layer<
             tool.sg_doctor,
             tool.screenshot,
             tool.process,
+            tool.disk,
+            tool.net_check,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

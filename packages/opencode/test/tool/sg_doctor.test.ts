@@ -5,7 +5,7 @@ import path from "path"
 import { writeFile, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 
-const { probeRing, probeRingMultimodal, probeMcp, probeScheduler } = __testing
+const { probeRing, probeRingMultimodal, probeMcp, probeScheduler, probeOpenAiCompatibleModels } = __testing
 
 describe("sg_doctor probes", () => {
   let server: Server
@@ -26,6 +26,30 @@ describe("sg_doctor probes", () => {
       if (req.url === "/v1/models-noring" && req.headers.authorization === "Bearer goodkey") {
         res.writeHead(200, { "content-type": "application/json" })
         res.end(JSON.stringify({ object: "list", data: [{ id: "OtherModel" }] }))
+        return
+      }
+      if (req.url === "/upstream/models" && req.headers.authorization === "Bearer goodkey") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(
+          JSON.stringify({
+            object: "list",
+            data: [
+              { id: "deepseek-v4-pro" },
+              { id: "deepseek-v4-flash" },
+              { id: "anthropic/claude-haiku" },
+            ],
+          }),
+        )
+        return
+      }
+      if (req.url === "/upstream/models" && req.headers.authorization === "Bearer wrongkey") {
+        res.writeHead(401, { "content-type": "application/json" })
+        res.end(JSON.stringify({ error: { message: "Invalid bearer" } }))
+        return
+      }
+      if (req.url === "/upstream-empty/models" && req.headers.authorization === "Bearer goodkey") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ object: "list", data: [] }))
         return
       }
       if (req.url === "/v1-textonly/chat/completions" && req.method === "POST") {
@@ -228,5 +252,40 @@ describe("sg_doctor probes", () => {
     const result = await probeRingMultimodal(`${baseUrl}/v1-textonly`, undefined, 4000)
     expect(result.ok).toBe(false)
     expect(result.detail).toMatch(/no API key/)
+  })
+
+  test("probeOpenAiCompatibleModels: deepseek-style /models with valid key", async () => {
+    const result = await probeOpenAiCompatibleModels("deepseek", `${baseUrl}/upstream`, "goodkey", 4000, "deepseek")
+    expect(result.target).toBe("deepseek")
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe(200)
+    expect(result.detail).toMatch(/3 models/)
+    expect(result.detail).toMatch(/deepseek: yes/)
+  })
+
+  test("probeOpenAiCompatibleModels: openrouter-style /models with valid key, no hint", async () => {
+    const result = await probeOpenAiCompatibleModels("openrouter", `${baseUrl}/upstream`, "goodkey", 4000)
+    expect(result.target).toBe("openrouter")
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/3 models/)
+    expect(result.detail).not.toMatch(/yes|no/)
+  })
+
+  test("probeOpenAiCompatibleModels: 401 surfaces auth error", async () => {
+    const result = await probeOpenAiCompatibleModels("deepseek", `${baseUrl}/upstream`, "wrongkey", 4000)
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(401)
+  })
+
+  test("probeOpenAiCompatibleModels: missing API key short-circuits", async () => {
+    const result = await probeOpenAiCompatibleModels("openrouter", `${baseUrl}/upstream`, undefined, 4000)
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/no API key/)
+  })
+
+  test("probeOpenAiCompatibleModels: empty model list reports not-ok", async () => {
+    const result = await probeOpenAiCompatibleModels("deepseek", `${baseUrl}/upstream-empty`, "goodkey", 4000)
+    expect(result.ok).toBe(false)
+    expect(result.detail).toMatch(/list empty/)
   })
 })
