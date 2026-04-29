@@ -1,0 +1,21 @@
+Inspect or transcode raster/vector image files without loading native imaging libraries — header-only parsing, suitable for downloads, screenshots, attachment prep.
+
+Actions:
+
+- `info`: parse the file header to report `format`, `mime`, `width`, `height`, optional `bit_depth`, `color_type`, `has_alpha`, `is_animated`, and `bytes`. Supports PNG (incl. APNG detection + tRNS-based alpha), JPEG (SOFn scan), GIF (animated detection), WebP (VP8/VP8L/VP8X), BMP (BITMAPCORE + BITMAPINFO), ICO (first-entry dimensions), and SVG (`width`/`height`/`viewBox`).
+- `data_url`: read an image file and return a `data:<mime>;base64,...` URL. Useful for sending screenshots into multimodal models that accept inline image_url parts. Pass `output_path` if the URL is too large to inline.
+- `from_data_url`: decode a `data:` URL and write the bytes to `output_path`. Reports the detected format/dimensions of the decoded image when possible.
+
+Parameters:
+
+- `filePath`: image file path (absolute or project-relative). Required for `info` and `data_url`.
+- `data_url`: a `data:` URL. Required for `from_data_url`.
+- `output_path`: write the result to this file. Required for `from_data_url`. Optional for `data_url`.
+- `format`: `text` (default) or `json` — affects `info` output only.
+
+Notes:
+
+- Pure header parsing — no decode, so works on multi-GB files without memory pressure (input is still capped at 64 MiB to keep things sane).
+- `has_alpha` is best-effort: PNG checks tRNS, JPEG never has alpha, WebP reads the VP8X/VP8L flags, BMP/ICO infer from bit depth.
+- For real raster transforms (resize, recompress, crop) use a dedicated tool — this is for inspection and attachment prep, not editing.
+- Data-URL output is capped at 4 MiB inline; larger results require `output_path`.

@@ -57,6 +57,8 @@ const AVAILABLE_TOOLS = [
   "template",
   "sqlite",
   "markdown",
+  "html",
+  "image",
 ]
 
 const AgentCreateCommand = cmd({

@@ -1,0 +1,30 @@
+Parse and inspect HTML without launching a browser. Pairs with `webfetch` for "fetch then read" workflows.
+
+Actions:
+
+- `to_text`: strip tags and return human-readable plain text. <script>, <style>, and <noscript> are dropped. <br>, <p>, <li>, headings, and table cells emit reasonable line breaks. HTML entities are decoded.
+- `links`: list every <a href> with anchor text, href, and 1-based line number. Optional same-host filter.
+- `images`: list every <img src> with alt text and src.
+- `scripts`: list every external <script src> and the (truncated) inline JS of every inline <script>.
+- `stylesheets`: list every <link rel=stylesheet href>.
+- `meta`: list every <meta> tag with name/property/http-equiv → content. Includes <title> as `meta.title`.
+- `headings`: list every h1..h6 in document order with level + text.
+- `forms`: list every <form action method enctype> and its <input>/<select>/<textarea> children with name + type.
+- `find`: tag/id/class lookup (`tag=div`, `id=main`, `class=card`). Returns matches with their inner text and outer HTML preview.
+
+Common parameters:
+
+- `content`: inline HTML. Required if `filePath` is not given.
+- `filePath`: read HTML from this file. Absolute or project-relative.
+- `output_path`: write result to this file instead of returning inline.
+- `tag` / `id` / `class`: filters for `find`.
+- `same_host_only`: for `links`, drop links pointing to other hosts. Optional `base_url` provides the reference host.
+- `base_url`: resolve relative URLs against this absolute URL when emitting `links`/`images`/`scripts`/`stylesheets`.
+- `format`: `text` (default) or `json` for structured output.
+- `include_inline_scripts`: when false, `scripts` only lists external `src=…`. Default true.
+
+Notes:
+
+- Parser is a forgiving subset (regex-based) covering well-formed HTML; mismatched/script-injected garbage is handled best-effort. For production-grade DOM work, prefer a dedicated headless browser. This is for inspection.
+- Inline `<script>` and `<style>` content is excluded from `to_text`.
+- Output is automatically truncated at 16k chars.
