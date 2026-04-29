@@ -1,0 +1,30 @@
+Inspect, extract, and create .zip archives without shelling out to platform-specific tools.
+
+Use this when you need to peek at, unpack, or assemble a zip file as part of an automation. Cross-platform and bounded — refuses path-traversal entries and stops when the configured size or entry-count cap is hit, so it is safe to point at adversarial archives.
+
+Parameters:
+- `action` (required): one of `list`, `extract`, `create`.
+- `archive_path` (required): path to the .zip. For `list`/`extract` it must already exist; for `create` it must NOT exist (no silent overwrite).
+- `dest_dir` (extract only, required): output directory. Created if missing. Each entry is checked to ensure it stays inside `dest_dir`.
+- `source_paths` (create only, required): one or more files or directories to pack. Directories are walked recursively.
+- `base_dir` (create only, optional): root used to compute relative names inside the zip. Defaults to the project directory.
+- `name_pattern` (optional, list/extract): case-insensitive substring filter applied to entry names. Useful for narrowing huge archives.
+- `max_entries` (optional): cap on processed entries. Default 5000, max 50000.
+- `max_total_bytes` (optional): cap on uncompressed bytes processed. Default 1 GiB, max 8 GiB. Defends against zip bombs.
+
+Behavior:
+- Only handles `.zip`. For `.tar`/`.tar.gz`/`.7z`, fall back to `bash` with the platform tool.
+- Path safety: any entry whose name is absolute, contains `..`, or has a Windows drive prefix is rejected before extraction. Entries that resolve outside `dest_dir` are also rejected.
+- Permissions inside the zip are not preserved (Node has no portable way to set them on Windows). Files are written readable/writable by the current user only.
+- Encrypted entries are listed but cannot be extracted. Treat encryption as opaque metadata.
+- `create` overwrite is a hard error rather than a warning. Move or delete the existing file first if you really mean it.
+
+Examples:
+- Peek at a downloaded installer: `{ "action": "list", "archive_path": "C:/Users/User/Downloads/release.zip" }`
+- Extract one file: `{ "action": "extract", "archive_path": "release.zip", "dest_dir": "out", "name_pattern": "config.yaml" }`
+- Pack a build output: `{ "action": "create", "archive_path": "dist.zip", "source_paths": ["packages/app/dist"], "base_dir": "packages/app" }`
+
+Do NOT use this tool to:
+- Replace the `read` tool for ordinary text files.
+- Pack/sign release artifacts that need executable bits or symlink preservation — use the platform's own tar/zip in `bash` for those.
+- Mutate an existing zip in place (no edit/append support).

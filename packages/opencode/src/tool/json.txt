@@ -1,0 +1,40 @@
+Read or modify a single field of a JSON file by path, without re-emitting the whole document yourself.
+
+Use this when:
+- You need a value buried inside a JSON file and want it without dumping the whole thing through `read` and parsing it mentally.
+- You need to flip one value (a feature flag, a model name, a timeout) without rewriting the surrounding file.
+- You need to drop a key, add a key, or merge a small patch object into an existing config.
+
+For broad rewrites or mixed text/JSON edits, prefer `edit`/`write`. This tool is for targeted, structure-aware operations on `.json` files only — it preserves the rest of the document, but does not preserve comments (raw JSON has none) and does not preserve property order strictly across writes (key order is JS-engine dependent).
+
+Parameters:
+- `action` (required): one of `get`, `set`, `delete`, `has`, `type`, `keys`, `merge`.
+- `filePath` (required): JSON file path. Absolute preferred; relative resolves from the project directory.
+- `path` (optional for read actions, required for write actions): dot/bracket path. Examples:
+  - `model` → top-level `model`
+  - `provider.deepseek.options.apiKey`
+  - `enabled_providers[0]` → first array element
+  - `mcp['sg-scheduler'].command` → bracket-quoted key with hyphen
+  - `$` or `.` or empty string → root (read actions only)
+- `value` (required for `set` and `merge`): any JSON value. For `merge`, it MUST be an object that is deep-merged into the value at `path`.
+- `pretty` (optional, default true): pretty-print writes with 2-space indent.
+- `create_missing` (optional, default true): for `set`/`merge`, create missing intermediate object/array steps.
+
+Behavior:
+- File-size cap: 64 MiB. Larger JSON gets refused — use bash with `jq` instead.
+- Write actions refuse a root-level `path` to avoid silently overwriting the whole file.
+- A trailing newline in the original is preserved on write.
+- Encrypted/comment-bearing files (JSONC) are NOT supported — comments will fail to parse. For JSONC use `read`/`edit`.
+
+Examples:
+- Look up the active model: `{ "action": "get", "filePath": "C:/Users/User/.config/opencode/opencode.json", "path": "model" }`
+- Toggle a flag: `{ "action": "set", "filePath": "x.json", "path": "experimental.defer_mcp_tools", "value": true }`
+- Drop a stale entry: `{ "action": "delete", "filePath": "x.json", "path": "mcp.old-server" }`
+- Merge a patch: `{ "action": "merge", "filePath": "x.json", "path": "provider.deepseek.options", "value": { "timeout": 60000 } }`
+- Sanity check: `{ "action": "type", "filePath": "x.json", "path": "preferences" }`
+- Enumerate sub-keys: `{ "action": "keys", "filePath": "x.json", "path": "mcp" }`
+
+Do NOT use this tool to:
+- Modify YAML, TOML, JSONC, or any non-strict-JSON file.
+- Make multi-key edits in one call (call multiple times — each call is one atomic write).
+- Pretty-print or reformat without changing values (use `bash` with `jq .` for that).

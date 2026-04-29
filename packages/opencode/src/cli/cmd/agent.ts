@@ -38,6 +38,8 @@ const AVAILABLE_TOOLS = [
   "disk",
   "net_check",
   "system_info",
+  "archive",
+  "json",
 ]
 
 const AgentCreateCommand = cmd({
