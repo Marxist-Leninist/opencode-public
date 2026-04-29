@@ -1,0 +1,42 @@
+Convert and manipulate colors across HEX, RGB, RGBA, HSL, HSLA, HSV, named CSS colors. Includes WCAG contrast ratio checking, mixing, lighten/darken, alpha control, complement.
+
+Use this for theme tooling, contrast-ratio checks, generating consistent palette values from a single source color, or transforming between color spaces.
+
+Parameters:
+- `action` (required):
+  - `parse` — Parse `value` (any supported format) into normalized `{ r, g, b, a, hex, rgb, rgba, hsl, hsla, hsv, named?, luminance, alpha }`.
+  - `to_hex` — Convert `value` to `#RRGGBB` or `#RRGGBBAA` if alpha < 1.
+  - `to_rgb` — Convert to `rgb(r, g, b)`.
+  - `to_rgba` — Convert to `rgba(r, g, b, a)`.
+  - `to_hsl` — Convert to `hsl(h, s%, l%)`.
+  - `to_hsv` — Convert to JSON `{ h, s, v }`.
+  - `lighten` — Lighten `value` by `amount` (0..1). E.g. `0.2` → +20% L.
+  - `darken` — Darken by `amount`.
+  - `saturate` / `desaturate` — Tweak HSL S by `amount`.
+  - `alpha` — Set output alpha to `amount` (0..1).
+  - `mix` — Average two colors `a` and `b` weighted by `amount` (0..1). 0 = all `a`, 1 = all `b`. Default 0.5.
+  - `complement` — Hue + 180°.
+  - `contrast` — WCAG 2.1 contrast ratio between `a` and `b` (1.00–21.00).
+  - `luminance` — Relative luminance of `value` (0..1).
+  - `is_dark` / `is_light` — Boolean using luminance threshold 0.179 (WCAG-ish).
+  - `random` — Generate a random color (full saturation by default; use `seed` for reproducibility).
+- `value` (string): a color literal — `#FFF`, `#FF8800`, `#FF8800AA`, `rgb(255,128,0)`, `rgba(...)`, `hsl(30, 100%, 50%)`, `hsla(...)`, `hsv(...)`, named CSS color (`tomato`, `rebeccapurple`).
+- `a`, `b` (strings): two colors for `mix` / `contrast`.
+- `amount` (number): 0..1 (default 0.1 for lighten/darken; 0.5 for mix).
+- `seed` (string): seed for `random` (otherwise true-random).
+
+Behavior:
+- HSL conversions use the standard formula; rounding stays inside one degree / one percentage point.
+- Alpha defaults to 1; conversions retain alpha (so to_hex of `rgba(0,0,0,0.5)` → `#00000080`).
+- Named colors: full CSS3 list (147 names: aliceblue → yellowgreen).
+- Output is human-readable string for `to_*`/`lighten`/etc.; JSON object for `parse`/`to_hsv`/`contrast`.
+
+Examples:
+- `{ "action": "to_hex", "value": "rgb(255, 200, 0)" }` → `#FFC800`.
+- `{ "action": "lighten", "value": "#336699", "amount": 0.2 }` → `#5C8AB3` (approx).
+- `{ "action": "contrast", "a": "#000000", "b": "#FFFFFF" }` → `{ ratio: 21, AA_normal:true, AAA_normal:true, ... }`.
+- `{ "action": "mix", "a": "red", "b": "blue", "amount": 0.5 }` → `#800080` (purple).
+
+Do NOT use this tool to:
+- Generate full N-step palettes (call `lighten`/`mix` repeatedly).
+- Match against a brand color database — only WCAG-named CSS colors are recognized.

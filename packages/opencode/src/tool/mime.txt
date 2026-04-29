@@ -1,0 +1,31 @@
+Detect MIME type, file extension, and binary/text classification — both from a file extension/path and from a file's actual byte signature ("magic number").
+
+Use this when uploading attachments, picking a Content-Type for an HTTP request, or distinguishing binary vs text before passing content to an LLM.
+
+Parameters:
+- `action` (required):
+  - `from_extension` — Map a `.ext`/`name.ext`/path → MIME type (extension lookup only).
+  - `from_path` — Like `from_extension` but accepts a full path (uses the trailing extension).
+  - `from_content` — Detect MIME by reading the file's leading bytes ("magic number") at `filePath` (file-system content-based).
+  - `from_bytes` — Same as `from_content` but for an inline base64 `value`.
+  - `extensions_for` — Reverse: list known extensions for a `mime`.
+  - `info` — Combined extension lookup + (if filePath given) magic detection + size + binary/text classification.
+- `value` (string): extension (`.png`/`png`), path, mime, or base64 bytes (depending on action).
+- `mime` (string): MIME type for `extensions_for`.
+- `filePath` (string): file to inspect for `from_content` / `info`.
+- `default` (string): MIME to return if nothing matches. Default `application/octet-stream`.
+
+Behavior:
+- Built-in lookup table covers common types: text (txt/md/json/yaml/toml/csv/tsv/xml/html/css/js/ts/...), image (png/jpg/gif/webp/svg/bmp/ico/avif), audio (mp3/wav/ogg/flac/m4a/aac), video (mp4/webm/mkv/mov/avi), font (ttf/otf/woff/woff2), archive (zip/tar/gz/bz2/xz/7z/rar/zst), pdf, epub, exe, doc/xls/ppt/docx/xlsx/pptx, sqlite, etc. ~140 mappings.
+- Magic-number sniffing for: PNG, JPEG, GIF, WebP, BMP, ICO, PDF, ZIP (incl. epub/jar/xlsx/docx detection), TAR (POSIX ustar), gzip, bzip2, xz, 7z, RAR, ELF, Mach-O, PE/EXE, MIDI, MP3 (ID3), WAV, FLAC, OGG, MP4/M4A, MKV/WebM, SQLite, MS Compound (legacy office), RIFF.
+- `info` action returns `{ extension, ext_mime, content_mime?, size?, binary, text? }`. `binary` is heuristic (NUL byte in first 512 bytes or non-UTF-8 sniff); when `binary=false` it returns the decoded text head.
+
+Examples:
+- `{ "action": "from_extension", "value": "screenshot.PNG" }` → `image/png`.
+- `{ "action": "from_content", "filePath": "C:/temp/somefile" }` → `application/zip` (matches PK signature, even with wrong extension).
+- `{ "action": "extensions_for", "mime": "image/jpeg" }` → `["jpg","jpeg","jpe"]`.
+- `{ "action": "info", "filePath": "doc.docx" }` → `{ extension:".docx", ext_mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", content_mime:"application/zip", size:14732, binary:true }`.
+
+Do NOT use this tool to:
+- Convert images/files between formats (use `image` for image data-URLs; `archive` for zip/tar; external tools for re-encoding).
+- Validate that a file is really what its extension claims (use `info` and compare `ext_mime` vs `content_mime`).

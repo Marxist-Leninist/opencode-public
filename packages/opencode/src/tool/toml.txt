@@ -1,0 +1,39 @@
+Parse and stringify TOML (Tom's Obvious Minimal Language) v1.0.0 documents.
+
+Use this when reading or writing pyproject.toml, Cargo.toml, .cargo/config.toml, or any TOML config without spawning a Python/Cargo subshell.
+
+Parameters:
+- `action` (required):
+  - `parse` — TOML string → JSON object.
+  - `stringify` — JSON object → TOML string.
+  - `to_json` — alias of `parse`.
+  - `from_json` — alias of `stringify`.
+- `value` (string): TOML text (parse) OR a JSON-encoded object string (stringify).
+- `data` (object/array): JSON value to stringify (preferred over `value` for stringify).
+- `filePath` (string): read TOML from this file instead of `value`.
+- `output_path` (string): when stringifying, write the result to this file.
+- `pretty` (boolean): pretty-print stringify output (default true).
+
+Behavior:
+- Subset of TOML 1.0.0:
+  - Bare keys, quoted keys ("..." and '...').
+  - Strings: basic ("..."), literal ('...'), multi-line basic ("""..."""), multi-line literal ('''...''').
+  - Integers (decimal, 0x/0o/0b prefixes), floats (incl. inf, nan, exponents, +/-).
+  - Booleans (true/false).
+  - Datetimes/dates/times (kept as strings — TOML doesn't have a JSON-native datetime).
+  - Arrays (homogeneous-ish — mixed allowed in our parser), inline tables { a = 1, b = 2 }.
+  - Tables [a.b.c], array-of-tables [[a.b]].
+- Stringify emits canonical TOML: top-level scalars first, then tables/array-of-tables.
+- Unicode escapes (\u, \U) and standard escapes (\n \t \r \b \f \\ \" \') supported in basic strings.
+- Numbers preserve sign; trailing underscores (`1_000_000`) stripped during parse.
+
+Examples:
+- Parse: `{ "action": "parse", "value": "name = 'opencode'\\nversion = '1.0.0'\\n[deps]\\neffect = '3.0.0'" }`
+  → `{ "name":"opencode", "version":"1.0.0", "deps": { "effect":"3.0.0" } }`
+- Stringify: `{ "action": "stringify", "data": { "name":"opencode", "deps":{ "effect":"3.0.0" } } }`
+  → `name = "opencode"\n\n[deps]\neffect = "3.0.0"\n`
+- Read file: `{ "action": "parse", "filePath": "pyproject.toml" }`.
+
+Do NOT use this tool to:
+- Edit individual TOML keys atomically (parse → mutate → stringify; or use `read`+`edit`).
+- Validate against a schema.

@@ -52,6 +52,12 @@ import { CryptoTool } from "./crypto"
 import { CompressTool } from "./compress"
 import { SemverTool } from "./semver"
 import { PathTool } from "./path"
+import { TomlTool } from "./toml"
+import { IniTool } from "./ini"
+import { MimeTool } from "./mime"
+import { ColorTool } from "./color"
+import { UnicodeTool } from "./unicode"
+import { BenchTool } from "./bench"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -195,6 +201,12 @@ export const layer: Layer.Layer<
     const compresstool = yield* CompressTool
     const semvertool = yield* SemverTool
     const pathtool = yield* PathTool
+    const tomltool = yield* TomlTool
+    const initool = yield* IniTool
+    const mimetool = yield* MimeTool
+    const colortool = yield* ColorTool
+    const unicodetool = yield* UnicodeTool
+    const benchtool = yield* BenchTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -324,6 +336,12 @@ export const layer: Layer.Layer<
           compress: Tool.init(compresstool),
           semver: Tool.init(semvertool),
           path: Tool.init(pathtool),
+          toml: Tool.init(tomltool),
+          ini: Tool.init(initool),
+          mime: Tool.init(mimetool),
+          color: Tool.init(colortool),
+          unicode: Tool.init(unicodetool),
+          bench: Tool.init(benchtool),
         })
 
         return {
@@ -384,6 +402,12 @@ export const layer: Layer.Layer<
             tool.compress,
             tool.semver,
             tool.path,
+            tool.toml,
+            tool.ini,
+            tool.mime,
+            tool.color,
+            tool.unicode,
+            tool.bench,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

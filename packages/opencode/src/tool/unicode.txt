@@ -1,0 +1,39 @@
+Inspect and transform Unicode strings: codepoint listing, escape/unescape, normalization (NFC/NFD/NFKC/NFKD), category & script detection, width estimation, "confusables" check, hex/codepoint conversion.
+
+Use this when debugging encoding bugs, redacting RTL/zero-width chars, comparing visually-similar strings, or escaping strings into source code.
+
+Parameters:
+- `action` (required):
+  - `info` — `{ length, byte_length, codepoint_count, grapheme_count?, has_non_ascii, has_surrogates, has_combining, has_invisible, has_rtl, has_emoji }`.
+  - `codepoints` — Array of `{ char, codepoint, hex, name?, category, script, width }` per codepoint.
+  - `escape` — Convert to a JS-safe escape sequence with `\uXXXX`/`\u{1FXXX}` for non-ASCII.
+  - `unescape` — Reverse JS-style escapes (handles `\\n`, `\\t`, `\\xHH`, `\\uHHHH`, `\\u{H..H}`).
+  - `normalize` — Apply Unicode normalization. `form` = `NFC`/`NFD`/`NFKC`/`NFKD` (default `NFC`).
+  - `from_codepoints` — Build a string from `codepoints` (number array).
+  - `to_codepoints` — Same as `codepoints` but returns just numbers.
+  - `width` — Total estimated terminal/display width (East Asian Wide = 2, zero-width = 0, normal = 1).
+  - `strip_invisible` — Drop zero-width / formatting / RTL override chars.
+  - `is_confusable` — Compare `a` and `b` after NFKC + Unicode "confusables" mapping; returns `{ confusable, normalized_a, normalized_b }`. Detects "Pаypal" (Cyrillic а) vs "Paypal".
+  - `count` — `{ chars, codepoints, bytes_utf8, bytes_utf16 }`.
+- `value` (string): the input.
+- `a`, `b` (strings): for `is_confusable`.
+- `codepoints` (number[]): codepoints for `from_codepoints`.
+- `form` (`NFC`/`NFD`/`NFKC`/`NFKD`): normalization form.
+- `radix` (number): output radix for codepoint hex (default 16).
+
+Behavior:
+- Built-in name table for common ASCII/punctuation; full names rely on `String.fromCodePoint` round-trip plus a fallback "U+XXXX" label.
+- Categories use a compact range table (Lu/Ll/Lt/Lm/Lo/Nd/Nl/No/Pc/Pd/Ps/Pe/Pi/Pf/Po/Sm/Sc/Sk/So/Zs/Zl/Zp/Cc/Cf/Cs/Co/Cn).
+- Script detection covers Latin, Greek, Cyrillic, Hebrew, Arabic, CJK, Hiragana, Katakana, Hangul, Devanagari, Thai, common Emoji ranges.
+- "Confusables" mapping covers common homoglyph pairs (Latin/Cyrillic A-Z, fullwidth digits, etc.).
+- `strip_invisible` removes ZWSP (U+200B), ZWNJ, ZWJ, BOM (U+FEFF), LRM/RLM/LRO/RLO/PDF/LRI/RLI/FSI/PDI, soft hyphen, MONGOLIAN VOWEL SEPARATOR, etc.
+
+Examples:
+- `{ "action": "info", "value": "café" }` → `{ length:4, codepoint_count:4, has_non_ascii:true, has_combining:false, ... }`.
+- `{ "action": "escape", "value": "café\\n" }` → `caf\\u00e9\\n`.
+- `{ "action": "is_confusable", "a": "Paypal", "b": "Pаypal" }` → `{ confusable:true, ... }` (the second has Cyrillic а).
+- `{ "action": "codepoints", "value": "🚀a" }` → `[{ char:"🚀", codepoint:128640, hex:"1F680", category:"So", script:"Common", width:2 }, { char:"a", codepoint:97, hex:"61", category:"Ll", script:"Latin", width:1 }]`.
+
+Do NOT use this tool to:
+- Render glyphs or measure pixel width — `width` is terminal-cell-based.
+- Validate against a complete Unicode 15.1 name database — names are best-effort.

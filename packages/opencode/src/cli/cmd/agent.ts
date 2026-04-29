@@ -65,6 +65,12 @@ const AVAILABLE_TOOLS = [
   "compress",
   "semver",
   "path",
+  "toml",
+  "ini",
+  "mime",
+  "color",
+  "unicode",
+  "bench",
 ]
 
 const AgentCreateCommand = cmd({

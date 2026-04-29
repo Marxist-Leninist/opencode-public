@@ -1,0 +1,37 @@
+Run a shell command (or measure an inline operation) repeatedly and emit timing statistics: min, max, mean, median, p95, p99, stdev, ops/sec.
+
+Use this when comparing two implementations' real-world latency, sanity-checking that an optimization actually helps, or generating a perf number for a PR comment.
+
+Parameters:
+- `action` (required):
+  - `command` — Spawn a shell command repeatedly via the platform shell.
+  - `http` — `GET` (or `method` of) a URL repeatedly. Records connect+TTFB+download.
+- `command` (string): for `command` action — the command line to time.
+- `url` (string): for `http` action.
+- `method` (string): HTTP method (default `GET`).
+- `headers` (object): HTTP headers.
+- `body` (string): HTTP body (string only, not JSON-stringified).
+- `runs` (number): how many iterations. Default 10. Max 1000.
+- `warmup` (number): discarded warm-up iterations executed before measurement (default 0).
+- `timeout_ms` (number): per-iteration timeout. Default 60_000.
+- `parallel` (number): max concurrent iterations (default 1).
+- `cwd` (string): working directory for the spawned command.
+- `env` (object): extra env vars for the spawned command.
+- `expected_status` (number/array): for `http` action, status codes counted as "success" (default 200..299).
+- `fail_fast` (boolean): abort the suite after the first failed iteration.
+
+Behavior:
+- Times each iteration with `performance.now()` for sub-millisecond precision.
+- Reports stats in **ms**: `min`, `max`, `mean`, `median`, `p95`, `p99`, `stdev`, `total`, `successes`, `failures`, `ops_per_sec` (= 1000 * successes / sum(durations)).
+- For `command` action, each iteration runs in a fresh subshell. `cmd /c` on Windows; `/bin/sh -c` elsewhere.
+- For `http` action, follows redirects via the global `fetch`. Uses `AbortController` for `timeout_ms`.
+- A failed iteration (non-zero exit / non-success status / timeout) still gets timed and contributes to `failures`. `successes`-only stats also reported separately when failures > 0.
+
+Examples:
+- `{ "action": "command", "command": "node -e 'console.log(2+2)'", "runs": 20, "warmup": 2 }`.
+- `{ "action": "http", "url": "http://localhost:8080/health", "runs": 50, "parallel": 4 }`.
+
+Do NOT use this tool to:
+- Microbenchmark in-process JS — use a dedicated profiler.
+- Drive load tests sustained for minutes — `runs` is capped at 1000.
+- Measure a long-running daemon's startup time more than once per process — each iteration spawns fresh.

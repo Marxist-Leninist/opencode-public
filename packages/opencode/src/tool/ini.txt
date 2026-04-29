@@ -1,0 +1,35 @@
+Parse and stringify INI / .conf / .cfg / .gitconfig / .properties-style key=value files.
+
+Use this for editing Windows-style INI files, systemd unit files, .gitconfig, .editorconfig, .ini.
+
+Parameters:
+- `action` (required):
+  - `parse` — INI text → `{ section: { key: value }, ... }` (top-level keys land in the empty-string section "").
+  - `stringify` — JSON object → INI text.
+  - `to_json` / `from_json` — aliases of parse / stringify.
+- `value` (string): INI text (parse) OR JSON-encoded object (stringify).
+- `data` (object): JSON value to stringify.
+- `filePath` (string): read INI from this file instead of `value`.
+- `output_path` (string): when stringifying, write to this file.
+- `comment_chars` (string): characters that start a comment (default `#;`).
+- `delimiter` (string): key/value separator on output (default `=`); parser accepts both `=` and `:`.
+- `lower_case_keys` (boolean): lowercase all keys/sections during parse.
+- `coerce_numbers` (boolean): on parse, "123"/"1.5" → number; "true"/"false" → bool. Default false (everything is string).
+
+Behavior:
+- Sections introduced by `[name]`. Subsequent keys belong to that section until the next `[...]`.
+- Lines beginning with comment_chars or empty lines are ignored.
+- Quoted values ("..." or '...') are unwrapped — preserving leading/trailing whitespace.
+- Repeated keys: last value wins (no array merging — INI has no canonical array form).
+- Stringify emits empty-section keys first, then `[section]` headers in insertion order.
+
+Examples:
+- Parse: `{ "action": "parse", "value": "[server]\\nhost = localhost\\nport = 8080" }`
+  → `{ "": {}, "server": { "host":"localhost", "port":"8080" } }`
+- Coerce: same with `coerce_numbers: true` → `{ ..., "server": { "host":"localhost", "port":8080 } }`
+- Stringify: `{ "action": "stringify", "data": { "server": { "host":"localhost" } } }`
+  → `[server]\nhost = localhost\n`
+
+Do NOT use this tool to:
+- Parse YAML/JSON/TOML/XML (use the dedicated tool).
+- Handle Git's multi-key syntax (`[remote "origin"]` is supported, but per-key `branch.master.remote = origin` style is not — fetch with `bash` `git config --get`).
