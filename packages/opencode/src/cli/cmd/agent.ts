@@ -40,6 +40,9 @@ const AVAILABLE_TOOLS = [
   "system_info",
   "archive",
   "json",
+  "cron",
+  "datetime",
+  "encode",
 ]
 
 const AgentCreateCommand = cmd({

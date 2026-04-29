@@ -1,0 +1,33 @@
+Encode or decode a string using base64, base64url, hex, url-percent, or JWT.
+
+Use this when you need to inspect or produce common-format strings without spawning a shell — decode a JWT to read its claims, base64-decode a payload, percent-decode a URL parameter, hex-encode a binary blob to compare against a checksum, etc. Pure transform; no network or filesystem.
+
+Parameters:
+- `action` (required): `"encode"` or `"decode"`.
+- `format` (required): one of:
+  - `base64` — standard base64 (with padding).
+  - `base64url` — URL-safe base64 (no padding).
+  - `hex` — lowercase hex pairs (no separators).
+  - `url` — percent-encoding for URL components (`encodeURIComponent`/`decodeURIComponent`).
+  - `jwt` — decode-only. Parses a JWT into `header`, `payload`, and the raw signature.
+- `value` (required): the string to encode or decode.
+- `input_encoding` (optional): how to interpret `value` for the `encode` action. Default `utf8`. Accepts `utf8`, `hex`, `base64` — handy for round-tripping (e.g. encode some hex bytes as base64).
+- `output_encoding` (optional): how to render the bytes for `decode`. Default `utf8`. Accepts `utf8`, `hex`, `base64`.
+
+Behavior:
+- For `decode`+`jwt`, returns `metadata.jwt` with `header` and `payload` parsed as JSON, plus the base64url-encoded signature so you can verify it elsewhere if needed. Does NOT verify the signature.
+- For `encode` actions, always returns the encoded text and the input byte length.
+- For `decode` actions, returns the decoded string in the requested `output_encoding` and the decoded byte length.
+- Trim whitespace and newlines around the input transparently.
+
+Examples:
+- Decode a base64 payload: `{ "action": "decode", "format": "base64", "value": "aGVsbG8=" }`
+- Encode bytes to hex: `{ "action": "encode", "format": "hex", "value": "hello" }`
+- Decode a JWT: `{ "action": "decode", "format": "jwt", "value": "eyJhbGciOi..." }`
+- Percent-encode for a URL query: `{ "action": "encode", "format": "url", "value": "a b&c=d" }`
+- Convert hex bytes to base64: `{ "action": "encode", "format": "base64", "value": "deadbeef", "input_encoding": "hex" }`
+
+Do NOT use this tool to:
+- Cryptographically verify a JWT signature (this is a decode-only convenience, not a verifier).
+- Hash data — use the `hash` tool.
+- Read or write files — pass strings directly.

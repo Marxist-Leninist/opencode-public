@@ -27,6 +27,9 @@ import { NetCheckTool } from "./net_check"
 import { SystemInfoTool } from "./system_info"
 import { ArchiveTool } from "./archive"
 import { JsonTool } from "./json"
+import { CronTool } from "./cron"
+import { DateTimeTool } from "./datetime"
+import { EncodeTool } from "./encode"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -145,6 +148,9 @@ export const layer: Layer.Layer<
     const systeminfotool = yield* SystemInfoTool
     const archivetool = yield* ArchiveTool
     const jsontool = yield* JsonTool
+    const crontool = yield* CronTool
+    const datetimetool = yield* DateTimeTool
+    const encodetool = yield* EncodeTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -249,6 +255,9 @@ export const layer: Layer.Layer<
           system_info: Tool.init(systeminfotool),
           archive: Tool.init(archivetool),
           json: Tool.init(jsontool),
+          cron: Tool.init(crontool),
+          datetime: Tool.init(datetimetool),
+          encode: Tool.init(encodetool),
         })
 
         return {
@@ -284,6 +293,9 @@ export const layer: Layer.Layer<
             tool.system_info,
             tool.archive,
             tool.json,
+            tool.cron,
+            tool.datetime,
+            tool.encode,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

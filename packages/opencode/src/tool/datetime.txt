@@ -1,0 +1,32 @@
+Timezone-aware date/time math: get the current time, parse a timestamp, format it for another timezone, add a duration to it, or compute the difference between two timestamps.
+
+Use this when you need to reason about wall-clock time without spawning a shell — convert a UTC timestamp to a user's local timezone, add 12 hours to a deadline, work out how long ago a log entry was, or compute how many minutes are left until a scheduled run. Pairs with the `cron` and `wait` tools when planning automation.
+
+Parameters:
+- `action` (required): one of:
+  - `now` — return the current instant in the requested timezone (and as ISO-8601 + epoch millis).
+  - `parse` — parse `value` as ISO-8601 / RFC 2822 / unix-epoch-seconds / unix-epoch-millis and return the canonical representation.
+  - `format` — format `value` (any of the parse-able forms above) into the requested `timezone`.
+  - `add` — take `value`, add `duration`, return the result. Negative durations subtract.
+  - `diff` — return the difference between `value` (the start) and `value2` (the end), in days/hours/minutes/seconds/millis.
+- `value` (optional): the input timestamp for parse/format/add/diff. Accepts ISO-8601, RFC 2822, or a number-as-string interpreted as unix-epoch-seconds (1e9..1e10) or unix-epoch-millis (>1e12).
+- `value2` (optional): the second timestamp, required for `diff`.
+- `duration` (optional): for `add`. Format: signed list of components, e.g. `"1d"`, `"2h30m"`, `"-15m"`, `"7d12h"`, `"500ms"`. Supported units: `ms`, `s`, `m`, `h`, `d`, `w`. Months/years are deliberately not supported (they are not constant durations).
+- `timezone` (optional): IANA timezone for the formatted output. Default is the host's local timezone. The instant itself is timezone-independent — only the formatted representation is affected.
+
+Behavior:
+- Always returns `metadata.iso` (UTC ISO-8601), `metadata.epoch_ms`, and `metadata.formatted` (in the requested timezone, with a numeric UTC offset).
+- For `diff`, returns a structured breakdown plus a humanised string ("3d 4h 12m"); the sign reflects `value2 - value`.
+- The tool is pure — no network, no filesystem.
+
+Examples:
+- Current time: `{ "action": "now", "timezone": "Asia/Tokyo" }`
+- Parse and reformat: `{ "action": "format", "value": "2026-04-29T07:30:00Z", "timezone": "America/New_York" }`
+- Add an hour to a deadline: `{ "action": "add", "value": "2026-04-29T17:00:00Z", "duration": "1h" }`
+- Time until next quota reset: `{ "action": "diff", "value": "2026-04-29T15:00:00Z", "value2": "2026-04-30T00:00:00Z" }`
+- Subtract a week: `{ "action": "add", "value": "2026-04-29T00:00:00Z", "duration": "-7d" }`
+
+Do NOT use this tool to:
+- Run cron schedules — use the `cron` tool for next-fire calculations.
+- Pause / wait — use the `wait` tool.
+- Compute calendar arithmetic in months or years (not supported here, since their length depends on the anchor date).
