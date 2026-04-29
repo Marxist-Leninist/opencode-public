@@ -1,0 +1,42 @@
+Common text manipulations on inline strings or files: counts, case, slugify, normalize, trim, line filtering, sort, dedupe, reverse.
+
+Use this for quick text wrangling that doesn't need a regex or shell pipeline. For pattern-rich work, use `regex`. For per-file editing, use `edit`/`apply_patch`.
+
+Parameters:
+- `action` (required):
+  - `count`     — character/byte/word/line counts (and a grapheme estimate if available).
+  - `case`      — convert to a case mode; requires `mode`.
+  - `slugify`   — URL-safe slug (Unicode-folded, lowercased, joined by `separator`).
+  - `normalize` — collapse runs of whitespace; trim line edges; normalise CRLF → LF.
+  - `trim`      — strip leading/trailing whitespace per line (default) or whole input (`whole=true`).
+  - `lines`     — head/tail/range/grep filter on lines.
+  - `reverse`   — reverse lines (default) or characters (`reverse_chars=true`).
+  - `sort`      — sort lines (`desc`, `numeric`, `case_insensitive`).
+  - `dedupe`    — remove duplicate lines preserving first occurrence.
+- `content` / `filePath`: input source.
+- `output_path` (optional): write result to file instead of returning inline.
+
+Per-action options:
+- case: `mode` ∈ lower, upper, title, sentence, snake, kebab, camel, pascal, constant.
+- slugify: `separator` (default `-`).
+- trim: `whole` boolean.
+- lines: `head`, `tail`, `range_start`, `range_end` (1-indexed, inclusive), `grep`, `grep_regex`, `invert`.
+- sort: `desc`, `numeric`, `case_insensitive`.
+- dedupe: `case_insensitive`.
+- reverse: `reverse_chars`.
+
+Behavior:
+- `count` returns `metadata.count = { characters, bytes, words, lines, graphemes_estimate? }`.
+- All output is truncated to 16,000 chars inline; use `output_path` for larger outputs.
+
+Examples:
+- Count words: `{ "action": "count", "filePath": "README.md" }`
+- snake_case a string: `{ "action": "case", "mode": "snake", "content": "Hello World - Foo Bar" }`
+- Filter lines containing "ERROR": `{ "action": "lines", "filePath": "log.txt", "grep": "ERROR" }`
+- Tail 50 lines: `{ "action": "lines", "filePath": "log.txt", "tail": 50 }`
+- Sort numerically descending: `{ "action": "sort", "content": "10\n2\n30", "numeric": true, "desc": true }`
+- Dedupe ignoring case: `{ "action": "dedupe", "content": "Foo\nfoo\nBar", "case_insensitive": true }`
+
+Do NOT use this tool to:
+- Edit files in place — outputs always go through `output_path` or the inline result.
+- Tokenise for ML/NLP — `words` here is whitespace-delimited, not BPE/WordPiece.

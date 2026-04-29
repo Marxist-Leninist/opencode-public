@@ -1,0 +1,28 @@
+Convert between YAML and JSON.
+
+Use this when you need to read a YAML config (CI/CD pipelines, k8s manifests, ansible playbooks, frontmatter) into structured form, or to emit a YAML file from a JSON value.
+
+Parameters:
+- `action` (required):
+  - `parse`     — YAML → JSON.
+  - `to_json`   — alias of parse.
+  - `stringify` — JSON value → YAML.
+  - `from_json` — alias of stringify.
+- `content` (optional): inline input. For parse/to_json: YAML; for stringify/from_json: JSON.
+- `filePath` (optional): read input from file instead of `content`.
+- `output_path` (optional): write the result to a file instead of returning inline.
+- `pretty` (optional): pretty-print JSON output for parse/to_json. Default true.
+
+Backed by Bun's built-in YAML implementation, so:
+- Recognises YAML 1.2 syntax including anchors and aliases.
+- Round-trips most JSON-compatible YAML losslessly. Tags and comments are NOT preserved.
+- Multi-document streams (`---`) are not split — only the first document is returned.
+
+Examples:
+- Read a Helm values file: `{ "action": "parse", "filePath": "values.yaml" }`
+- Convert JSON config to YAML: `{ "action": "stringify", "content": "{\"service\": {\"port\": 8080}}" }`
+- Convert a YAML file to JSON next to it: `{ "action": "to_json", "filePath": "config.yaml", "output_path": "config.json" }`
+
+Do NOT use this tool to:
+- Edit a single YAML key while preserving comments — round-tripping drops them. Use `edit` for line-precise changes.
+- Validate against a schema — combine with another tool/library for that.

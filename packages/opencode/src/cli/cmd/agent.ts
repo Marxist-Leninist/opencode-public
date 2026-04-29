@@ -46,6 +46,10 @@ const AVAILABLE_TOOLS = [
   "http",
   "regex",
   "uuid",
+  "csv",
+  "yaml",
+  "diff",
+  "text",
 ]
 
 const AgentCreateCommand = cmd({

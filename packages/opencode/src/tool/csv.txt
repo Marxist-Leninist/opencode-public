@@ -1,0 +1,38 @@
+Parse CSV/TSV into JSON or generate CSV/TSV from JSON.
+
+Use this for one-shot table-data wrangling: turning a CSV file into objects you can post-process, or turning a list of objects into a CSV file ready for Excel/upload.
+
+Parameters:
+- `action` (required):
+  - `parse`  — read CSV → JSON.
+  - `generate` — read JSON (array of arrays OR array of objects) → CSV.
+  - `info`   — parse and report shape (rows × columns + header) without printing data.
+- `content` (optional): inline input text. For `parse`/`info`, CSV; for `generate`, JSON.
+- `filePath` (optional): read input from file instead of `content`. Absolute or relative to project dir.
+- `output_path` (optional): write the result to a file instead of returning inline (recommended for large outputs).
+- `delimiter` (optional): default `,`. Use `\t` for TSV.
+- `quote` (optional): default `"`. Single character.
+- `has_header` (optional):
+  - For `parse`/`info`: treat first row as header (default true). When true, `parse` returns an array of objects keyed by header names; when false, an array of arrays.
+  - For `generate`: emit a header row (default true when input is array of objects, false when array of arrays).
+- `trim` (optional): trim whitespace from each parsed field. Default false.
+- `limit` (optional): cap rows returned by parse. 0 = no cap. Default 0.
+
+Behavior:
+- Parser is RFC 4180-aware: handles quoted fields, embedded delimiters, embedded newlines, and `""` escaped quotes.
+- Output is JSON (for parse) or CSV text (for generate); inline output is truncated to 16,000 chars — use `output_path` for full payloads.
+- File I/O is permission-checked via the standard read/write gate.
+
+Examples:
+- Parse inline TSV with header:
+  `{ "action": "parse", "content": "a\tb\n1\t2\n3\t4", "delimiter": "\t" }`
+- Convert a CSV file to JSON next to it:
+  `{ "action": "parse", "filePath": "data.csv", "output_path": "data.json" }`
+- Inspect a huge CSV without reading it all:
+  `{ "action": "info", "filePath": "huge.csv" }`
+- Generate CSV from JSON array of objects:
+  `{ "action": "generate", "content": "[{\"name\":\"alice\",\"age\":30},{\"name\":\"bob\",\"age\":25}]" }`
+
+Do NOT use this tool to:
+- Append rows to an existing CSV — read it, mutate JSON, regenerate.
+- Stream-process multi-GB files — use `bash` with awk/cut for that.

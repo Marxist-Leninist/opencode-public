@@ -1,0 +1,33 @@
+Compute a diff between two strings or files.
+
+Use this when you want to compare versions of a file, build a patch to apply elsewhere, or quickly summarise the size of a change. For mutating files, use `edit`/`apply_patch`; this tool is read-only and reports differences.
+
+Parameters:
+- `format` (optional):
+  - `unified` (default) — RFC unified diff with `@@` hunks; suitable for `patch -p1`.
+  - `lines` — per-line annotated output (`+ … `, `- … `, `  …`).
+  - `words` — per-word inline diff using `[-foo-]{+bar+}` markers.
+  - `chars` — per-character inline diff with the same markers.
+  - `stat`  — compact summary like `+12 -5 =123`.
+- `a` / `b` (optional): inline left/right side text.
+- `a_path` / `b_path` (optional): read sides from files. Either inline OR file is required for each side.
+- `output_path` (optional): write the diff to a file instead of returning inline.
+- `context` (optional): unified-format context lines. Default 3.
+- `ignore_whitespace` (optional): treat whitespace-only differences as equal. Default false.
+- `label_a` / `label_b` (optional): unified-diff header labels. Defaults to `a_path`/`b_path` or "a"/"b".
+
+Behavior:
+- Line counts in `metadata.added_lines` / `removed_lines` / `unchanged_lines` always reflect line-mode tally regardless of the requested `format`, so you can ask for `stat` and still get them.
+- `metadata.identical` is true when no lines differ.
+- Inline output is truncated to 16,000 chars; use `output_path` for larger diffs.
+
+Examples:
+- Compare two files, write a `.patch`:
+  `{ "format": "unified", "a_path": "old.go", "b_path": "new.go", "output_path": "change.patch" }`
+- Quick line stat between two files: `{ "format": "stat", "a_path": "before.txt", "b_path": "after.txt" }`
+- Word-level diff inline:
+  `{ "format": "words", "a": "the quick brown fox", "b": "the slow brown dog" }`
+
+Do NOT use this tool to:
+- Apply a patch — that's `apply_patch` / `edit`.
+- Diff binary files — output will be unreadable.

@@ -33,6 +33,10 @@ import { EncodeTool } from "./encode"
 import { HttpTool } from "./http"
 import { RegexTool } from "./regex"
 import { UuidTool } from "./uuid"
+import { CsvTool } from "./csv"
+import { YamlTool } from "./yaml"
+import { DiffTool } from "./diff"
+import { TextTool } from "./text"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -157,6 +161,10 @@ export const layer: Layer.Layer<
     const httptool = yield* HttpTool
     const regextool = yield* RegexTool
     const uuidtool = yield* UuidTool
+    const csvtool = yield* CsvTool
+    const yamltool = yield* YamlTool
+    const difftool = yield* DiffTool
+    const texttool = yield* TextTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -267,6 +275,10 @@ export const layer: Layer.Layer<
           http: Tool.init(httptool),
           regex: Tool.init(regextool),
           uuid: Tool.init(uuidtool),
+          csv: Tool.init(csvtool),
+          yaml: Tool.init(yamltool),
+          diff: Tool.init(difftool),
+          text: Tool.init(texttool),
         })
 
         return {
@@ -308,6 +320,10 @@ export const layer: Layer.Layer<
             tool.http,
             tool.regex,
             tool.uuid,
+            tool.csv,
+            tool.yaml,
+            tool.diff,
+            tool.text,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
