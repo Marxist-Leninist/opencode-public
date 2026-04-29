@@ -288,7 +288,49 @@ async function readAllDefinitions() {
       result.push(await readDefinition(id))
     } catch {}
   }
+  // Reconcile each definition's `enabled` flag against the actual Windows
+  // scheduler state. This catches the common "I disabled the OS task via
+  // schtasks/Task Scheduler GUI but the JSON still says enabled=true" drift
+  // that makes the Automations panel show "Enabled" while reality is paused.
+  await Promise.all(result.map((def) => reconcileEnabled(def).catch(() => undefined)))
   return result.toSorted((a, b) => a.id.localeCompare(b.id))
+}
+
+// Cheap one-shot reconciliation: if the OS scheduler reports the task as
+// Disabled (or missing), but our JSON definition still claims enabled=true,
+// fix the JSON to match reality. Same in the other direction. Only mutates
+// the file when there is an actual mismatch so we do not thrash mtimes.
+async function reconcileEnabled(def: AutomationDefinition): Promise<AutomationDefinition> {
+  if (process.platform !== "win32") return def
+  const ac = new AbortController()
+  let parsed: ParsedTaskQuery
+  try {
+    const status = await schedulerStatus(def, ac.signal)
+    parsed = status.parsed
+  } catch {
+    return def
+  }
+  const state = (parsed.scheduled_task_state ?? "").trim().toLowerCase()
+  if (!state) {
+    // Task not present in OS scheduler at all → not actually scheduled to run.
+    if (def.enabled) {
+      def.enabled = false
+      def.updated_at = new Date().toISOString()
+      try {
+        await writeDefinition(def)
+      } catch {}
+    }
+    return def
+  }
+  const osEnabled = state === "enabled"
+  if (def.enabled !== osEnabled) {
+    def.enabled = osEnabled
+    def.updated_at = new Date().toISOString()
+    try {
+      await writeDefinition(def)
+    } catch {}
+  }
+  return def
 }
 
 function cmdQuote(input: string) {
