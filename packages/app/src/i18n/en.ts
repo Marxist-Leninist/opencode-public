@@ -714,6 +714,30 @@ export const dict = {
   "settings.section.server": "Server",
   "settings.tab.general": "General",
   "settings.tab.shortcuts": "Shortcuts",
+  "settings.personalization.title": "Personalization",
+  "settings.personalization.description":
+    "Private SG preferences saved to your global OpenCode config and injected into every agent system prompt.",
+  "settings.personalization.section.identity": "Identity",
+  "settings.personalization.section.instructions": "Custom instructions",
+  "settings.personalization.field.personality": "Personality",
+  "settings.personalization.field.personality.description":
+    "Default tone the agent uses when no other style is requested.",
+  "settings.personalization.field.callMe": "What should the agent call you?",
+  "settings.personalization.field.callMe.description":
+    "Optional name or nickname. Pinned into the system prompt as \"Call me <name>\".",
+  "settings.personalization.field.callMe.placeholder": "Scott",
+  "settings.personalization.field.work": "What best describes your work?",
+  "settings.personalization.field.work.description":
+    "Optional one-line context, e.g. \"I run an OpenCode fork plus an MCP cluster\".",
+  "settings.personalization.field.work.placeholder": "OpenCode fork + MCP cluster owner",
+  "settings.personalization.field.instructions": "Instructions",
+  "settings.personalization.field.instructions.description":
+    "Separate independent preferences with a blank line. They are stored as config.preferences.",
+  "settings.personalization.field.instructions.placeholder":
+    "Example: SG1 and SG2 are one unified MCP server with two access points.",
+  "settings.personalization.action.save": "Save preferences",
+  "settings.personalization.action.reset": "Reset",
+  "settings.personalization.status": "{{count}} saved preference(s)",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL integration",
   "settings.desktop.wsl.description": "Run the OpenCode server inside WSL on Windows.",
