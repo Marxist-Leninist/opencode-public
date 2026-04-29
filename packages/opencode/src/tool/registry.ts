@@ -18,6 +18,8 @@ import { NotifyTool } from "./notify"
 import { OpenTool } from "./open"
 import { ClipboardTool } from "./clipboard"
 import { AutomationTool } from "./automation"
+import { DownloadTool } from "./download"
+import { SgDoctorTool } from "./sg_doctor"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -127,6 +129,8 @@ export const layer: Layer.Layer<
     const opentool = yield* OpenTool
     const clipboardtool = yield* ClipboardTool
     const automationtool = yield* AutomationTool
+    const downloadtool = yield* DownloadTool
+    const sgdoctortool = yield* SgDoctorTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -222,6 +226,8 @@ export const layer: Layer.Layer<
           open: Tool.init(opentool),
           clipboard: Tool.init(clipboardtool),
           automation: Tool.init(automationtool),
+          download: Tool.init(downloadtool),
+          sg_doctor: Tool.init(sgdoctortool),
         })
 
         return {
@@ -248,6 +254,8 @@ export const layer: Layer.Layer<
             tool.open,
             tool.clipboard,
             tool.automation,
+            tool.download,
+            tool.sg_doctor,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

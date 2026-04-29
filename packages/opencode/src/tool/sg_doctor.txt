@@ -1,0 +1,30 @@
+Run a health check across the SG-modded OpenCode integrations: Ring 2.5 1T proxy, SG1/SG2 unified MCP server, and the local sg-scheduler MCP. Returns a structured report so you can give the user a clean diagnosis instead of running ad-hoc curl commands.
+
+Use this when:
+- The user asks "is the proxy up", "is Ring working", "are MCP servers reachable", "what's the SG status", or similar.
+- A Ring or MCP call fails and you want to know whether the failure is local network, the proxy, or upstream.
+- You're starting a long automated session and want to confirm dependencies before you commit.
+
+Parameters:
+- `targets` (optional): array of which targets to probe. Any subset of `ring`, `sg1`, `sg2`, `scheduler`. Default is all.
+- `ring_base_url` (optional): override the Ring proxy base URL. Default `https://doxx.lat/ring/v1`.
+- `ring_api_key` (optional): override the bearer token. By default the tool reads it from the OpenCode config (`provider.sg-ring.options.apiKey`).
+- `sg1_url` (optional): override the SG1 MCP URL. Default `https://doxx.lat/mcp/sse`.
+- `sg2_url` (optional): override the SG2 MCP URL. Default `https://mcp2.doxx.lat/mcp/sse`.
+- `timeout_ms` (optional): per-probe timeout in ms. Range 1000-60000. Default 8000.
+
+Behavior:
+- Each target is probed independently and concurrently.
+- For Ring, the tool hits `/models` with the bearer token and reports HTTP status + whether `Ring-2.5-1T` is in the model list.
+- For SG1/SG2, the tool issues a HEAD/GET to the SSE endpoint and reports whether the server is reachable; SG1 and SG2 are recorded as siblings of the same unified server.
+- For sg-scheduler, the tool checks whether the configured command exists on PATH and whether the script file is present.
+- The tool never throws on a single probe failure — it returns a report so the agent can summarize per-target.
+
+Output:
+- `metadata.results` is an object keyed by target (`ring`, `sg1`, `sg2`, `scheduler`), each `{ ok: boolean, status?, latency_ms?, detail? }`.
+- `metadata.ok` is true iff every probed target reports `ok: true`.
+
+Examples:
+- Check everything: `{}`
+- Just Ring: `{ "targets": ["ring"] }`
+- Cross-check the SG1/SG2 mirrors with a tighter timeout: `{ "targets": ["sg1", "sg2"], "timeout_ms": 3000 }`

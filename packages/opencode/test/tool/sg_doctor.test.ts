@@ -1,0 +1,122 @@
+import { describe, expect, test, beforeAll, afterAll } from "bun:test"
+import { createServer, type Server } from "node:http"
+import { __testing } from "../../src/tool/sg_doctor"
+import path from "path"
+import { writeFile, mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
+
+const { probeRing, probeMcp, probeScheduler } = __testing
+
+describe("sg_doctor probes", () => {
+  let server: Server
+  let baseUrl: string
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      if (req.url === "/v1/models" && req.headers.authorization === "Bearer goodkey") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ object: "list", data: [{ id: "Ring-2.5-1T" }] }))
+        return
+      }
+      if (req.url === "/v1/models" && req.headers.authorization === "Bearer wrongkey") {
+        res.writeHead(401)
+        res.end("auth failed")
+        return
+      }
+      if (req.url === "/v1/models-noring" && req.headers.authorization === "Bearer goodkey") {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ object: "list", data: [{ id: "OtherModel" }] }))
+        return
+      }
+      if (req.url === "/mcp/sse") {
+        if (req.method === "HEAD") {
+          res.writeHead(200, { "content-type": "text/event-stream" })
+          res.end()
+          return
+        }
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        res.write(":keepalive\n\n")
+        // Don't end - simulate SSE streaming.
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+    const addr = server.address()
+    if (typeof addr === "object" && addr) {
+      baseUrl = `http://127.0.0.1:${addr.port}`
+    }
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  test("probeRing detects Ring-2.5-1T listing with valid key", async () => {
+    const result = await probeRing(`${baseUrl}/v1`, "goodkey", 4000)
+    expect(result.target).toBe("ring")
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe(200)
+    expect(result.detail).toContain("Ring-2.5-1T")
+  })
+
+  test("probeRing reports missing API key", async () => {
+    const result = await probeRing(`${baseUrl}/v1`, undefined, 4000)
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain("no API key")
+  })
+
+  test("probeRing reports auth failure", async () => {
+    const result = await probeRing(`${baseUrl}/v1`, "wrongkey", 4000)
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(401)
+  })
+
+  test("probeRing flags missing model in list", async () => {
+    const result = await probeRing(`${baseUrl}/v1-noring`, "goodkey", 4000)
+    expect(result.ok).toBe(false)
+  })
+
+  test("probeMcp detects HEAD-reachable MCP endpoint", async () => {
+    const result = await probeMcp("sg1", `${baseUrl}/mcp/sse`, 4000)
+    expect(result.target).toBe("sg1")
+    expect(result.ok).toBe(true)
+    expect(result.status).toBeDefined()
+  })
+
+  test("probeMcp reports unreachable host", async () => {
+    const result = await probeMcp("sg2", "http://127.0.0.1:1/mcp/sse", 1500)
+    expect(result.target).toBe("sg2")
+    expect(result.ok).toBe(false)
+  })
+
+  test("probeScheduler accepts a valid local script entry", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "sgsched-"))
+    const script = path.join(dir, "server.py")
+    await writeFile(script, "print('ok')\n")
+    try {
+      const result = await probeScheduler({
+        mcp: { "sg-scheduler": { type: "local", command: ["python", script] } },
+      })
+      expect(result.ok).toBe(true)
+      expect(result.detail).toContain("python")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("probeScheduler flags missing script", async () => {
+    const result = await probeScheduler({
+      mcp: { "sg-scheduler": { type: "local", command: ["python", "/nope/missing-server.py"] } },
+    })
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain("not found")
+  })
+
+  test("probeScheduler flags missing config entry", async () => {
+    const result = await probeScheduler({})
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain("no sg-scheduler")
+  })
+})

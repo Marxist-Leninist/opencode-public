@@ -1,0 +1,31 @@
+Download a file from an HTTP(S) URL to a local path, streaming with live progress and optional integrity check.
+
+Use this when the user asks to download a file (driver, installer, archive, model, dataset, large image). Pairs with the `wait` tool (you can launch this in the background and `wait` for the destination file to stabilize) and with the `hash` tool (verify the downloaded bytes after).
+
+Parameters:
+- `url` (required): http(s) URL to fetch. Must start with http:// or https://. Redirects are followed.
+- `dest` (required): local file path to write to. Absolute paths preferred. Relative paths resolve from the project directory. Existing files at this path are overwritten unless `if_exists` says otherwise.
+- `expected_sha256` (optional): hex sha256 digest. Case-insensitive, non-hex characters stripped (so you can paste with colons/spaces). When set, the downloaded bytes are hashed on the fly and the tool fails if the digest does not match.
+- `expected_size_bytes` (optional): expected exact content length. If `Content-Length` is reported by the server and differs, the request is rejected before any bytes hit disk.
+- `headers` (optional): extra HTTP request headers as a JSON object. Useful for auth (`{"Authorization":"Bearer ..."}`), `User-Agent`, etc.
+- `timeout_ms` (optional): connection + per-chunk inactivity timeout in ms. Default 60000. Range 1000-3600000.
+- `if_exists` (optional): one of `overwrite` (default), `skip`, or `fail`. `skip` returns immediately without downloading and reports the existing size; `fail` throws.
+- `max_bytes` (optional): hard cap on bytes accepted. If the response exceeds this, the partial file is removed and the tool errors. Range 1024-21474836480 (20 GiB).
+
+Behavior:
+- Streams the response to disk so multi-gigabyte downloads do not OOM.
+- Reports live progress in metadata (`bytes_received`, `bytes_total` if known, `percent`, `kbps`) so a streaming UI shows progress.
+- Honors the abort signal — partial files are removed if the user cancels.
+- On success returns metadata: `bytes_received`, `bytes_total`, `elapsed_ms`, `kbps`, `sha256`, `content_type`, `final_url` (after redirects).
+- If `expected_sha256` is set and matches: `metadata.matches = true`. If it does not match: the destination file is removed and the tool errors.
+
+Examples:
+- Download an installer with checksum: `{ "url": "https://us.download.nvidia.com/.../596.21.exe", "dest": "C:\\\\Users\\\\me\\\\Downloads\\\\nvidia.exe", "expected_sha256": "a1b2..." }`
+- Download to project tmpdir, overwriting: `{ "url": "https://example.com/data.tar.gz", "dest": "tmp/data.tar.gz" }`
+- Skip if already on disk: `{ "url": "https://...", "dest": "models/big.safetensors", "if_exists": "skip" }`
+- Fetch a private resource: `{ "url": "https://api.example.com/file", "dest": "out.bin", "headers": { "Authorization": "Bearer abc" } }`
+
+Do NOT use this tool to:
+- Fetch a webpage you want to read — use the `fetch` (webfetch) tool, which converts HTML to markdown.
+- Upload a file. This tool is one-way: remote -> local.
+- Inspect HTTP headers without saving a body. Use `bash` with `curl -I` instead.

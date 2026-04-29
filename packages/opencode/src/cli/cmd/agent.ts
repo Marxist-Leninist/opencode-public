@@ -31,6 +31,8 @@ const AVAILABLE_TOOLS = [
   "open",
   "clipboard",
   "automation",
+  "download",
+  "sg_doctor",
 ]
 
 const AgentCreateCommand = cmd({

@@ -52,6 +52,8 @@ import type { NotifyTool } from "@/tool/notify"
 import type { OpenTool } from "@/tool/open"
 import type { ClipboardTool } from "@/tool/clipboard"
 import type { AutomationTool } from "@/tool/automation"
+import type { DownloadTool } from "@/tool/download"
+import type { SgDoctorTool } from "@/tool/sg_doctor"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
@@ -1595,6 +1597,12 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "automation"}>
           <Automation {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "download"}>
+          <Download {...toolprops} />
+        </Match>
+        <Match when={props.part.tool === "sg_doctor"}>
+          <SgDoctor {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "write"}>
           <Write {...toolprops} />
         </Match>
@@ -2093,6 +2101,67 @@ function Automation(props: ToolProps<typeof AutomationTool>) {
       Automation {action()}
       <Show when={id()}> {String(id())}</Show>
       <Show when={enabled() === false}> (disabled)</Show>
+    </InlineTool>
+  )
+}
+
+function Download(props: ToolProps<typeof DownloadTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const dest = createMemo(() => props.metadata.dest ?? props.input.dest ?? "")
+  const basename = createMemo(() => (dest() ? path.basename(String(dest())) : "file"))
+  const received = createMemo(() => props.metadata.bytes_received ?? 0)
+  const total = createMemo(() => props.metadata.bytes_total)
+  const percent = createMemo(() => props.metadata.percent)
+  const kbps = createMemo(() => props.metadata.kbps)
+  const skipped = createMemo(() => props.metadata.skipped === true)
+  const aborted = createMemo(() => props.metadata.aborted === true)
+  const matches = createMemo(() => props.metadata.matches)
+
+  const formatBytes = (n: number | undefined) => {
+    if (typeof n !== "number" || n < 0) return ""
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+  }
+
+  return (
+    <InlineTool icon="↓" pending="Downloading..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      Download {basename()}
+      <Show when={!skipped() && !aborted()}>
+        {" "}
+        {formatBytes(received())}
+        <Show when={typeof total() === "number"}> / {formatBytes(total())}</Show>
+        <Show when={typeof percent() === "number"}> ({percent()}%)</Show>
+        <Show when={typeof kbps() === "number" && isRunning()}> @ {kbps()} KB/s</Show>
+      </Show>
+      <Show when={skipped()}> (skipped, exists)</Show>
+      <Show when={aborted()}> (cancelled)</Show>
+      <Show when={matches() === true}> (verified)</Show>
+      <Show when={matches() === false}> (sha256 mismatch)</Show>
+    </InlineTool>
+  )
+}
+
+function SgDoctor(props: ToolProps<typeof SgDoctorTool>) {
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const ok = createMemo(() => props.metadata.ok)
+  const probed = createMemo(() => (props.metadata.probed ?? props.input.targets ?? []) as string[])
+  const failures = createMemo(() => {
+    const results = props.metadata.results ?? {}
+    const failed: string[] = []
+    for (const k of Object.keys(results)) {
+      if ((results as Record<string, { ok?: boolean }>)[k]?.ok === false) failed.push(k)
+    }
+    return failed
+  })
+
+  return (
+    <InlineTool icon="✚" pending="Probing..." spinner={isRunning()} complete={!isRunning()} part={props.part}>
+      sg_doctor
+      <Show when={probed().length > 0}> [{probed().join(",")}]</Show>
+      <Show when={ok() === true}> OK</Show>
+      <Show when={ok() === false}> FAIL ({failures().join(",")})</Show>
     </InlineTool>
   )
 }
