@@ -57,6 +57,38 @@ describe("tool.encode helpers", () => {
   test("encodeFormat hex is lowercase", () => {
     expect(__testing.encodeFormat(Buffer.from([0xde, 0xad, 0xbe, 0xef]), "hex")).toBe("deadbeef")
   })
+
+  test("base32 RFC 4648 known vectors", () => {
+    // RFC 4648 §10 test vectors.
+    expect(__testing.base32EncodeWith(Buffer.from(""), __testing.BASE32_ALPHABET)).toBe("")
+    expect(__testing.base32EncodeWith(Buffer.from("f"), __testing.BASE32_ALPHABET)).toBe("MY======")
+    expect(__testing.base32EncodeWith(Buffer.from("fo"), __testing.BASE32_ALPHABET)).toBe("MZXQ====")
+    expect(__testing.base32EncodeWith(Buffer.from("foo"), __testing.BASE32_ALPHABET)).toBe("MZXW6===")
+    expect(__testing.base32EncodeWith(Buffer.from("foob"), __testing.BASE32_ALPHABET)).toBe("MZXW6YQ=")
+    expect(__testing.base32EncodeWith(Buffer.from("fooba"), __testing.BASE32_ALPHABET)).toBe("MZXW6YTB")
+    expect(__testing.base32EncodeWith(Buffer.from("foobar"), __testing.BASE32_ALPHABET)).toBe("MZXW6YTBOI======")
+  })
+
+  test("base32 round-trip", () => {
+    const raw = Buffer.from("Hello, base32 world!")
+    const enc = __testing.base32EncodeWith(raw, __testing.BASE32_ALPHABET)
+    const dec = __testing.base32DecodeWith(enc, __testing.BASE32_ALPHABET)
+    expect(dec.equals(raw)).toBe(true)
+  })
+
+  test("base32 decode tolerates lowercase and missing padding", () => {
+    const raw = Buffer.from("foob")
+    const noPad = "MZXW6YQ"
+    const dec = __testing.base32DecodeWith(noPad.toLowerCase(), __testing.BASE32_ALPHABET)
+    expect(dec.equals(raw)).toBe(true)
+  })
+
+  test("base32hex round-trip", () => {
+    const raw = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    const enc = __testing.base32EncodeWith(raw, __testing.BASE32HEX_ALPHABET)
+    const dec = __testing.base32DecodeWith(enc, __testing.BASE32HEX_ALPHABET)
+    expect(dec.equals(raw)).toBe(true)
+  })
 })
 
 describe("tool.encode tool", () => {
@@ -132,6 +164,25 @@ describe("tool.encode tool", () => {
         expect((result.metadata.jwt?.header as any)?.alg).toBe("HS256")
         expect((result.metadata.jwt?.payload as any)?.sub).toBe("alice")
         expect(result.metadata.jwt?.signature).toBe("abc123sig")
+      }),
+    ),
+  )
+
+  it.live("encode + decode base32 via tool", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* EncodeTool
+        const tool = yield* toolInfo.init()
+        const enc = yield* tool.execute(
+          { action: "encode", format: "base32", value: "foobar" },
+          baseCtx,
+        )
+        expect(enc.metadata.result).toBe("MZXW6YTBOI======")
+        const dec = yield* tool.execute(
+          { action: "decode", format: "base32", value: "MZXW6YTBOI======" },
+          baseCtx,
+        )
+        expect(dec.metadata.result).toBe("foobar")
       }),
     ),
   )

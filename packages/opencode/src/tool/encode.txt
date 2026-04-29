@@ -7,6 +7,8 @@ Parameters:
 - `format` (required): one of:
   - `base64` — standard base64 (with padding).
   - `base64url` — URL-safe base64 (no padding).
+  - `base32` — RFC 4648 §6 (A–Z, 2–7) with `=` padding. Used by TOTP secrets, AWS keys.
+  - `base32hex` — RFC 4648 §7 extended-hex base32 (0–9, A–V).
   - `hex` — lowercase hex pairs (no separators).
   - `url` — percent-encoding for URL components (`encodeURIComponent`/`decodeURIComponent`).
   - `jwt` — decode-only. Parses a JWT into `header`, `payload`, and the raw signature.
