@@ -24,6 +24,7 @@ import { ScreenshotTool } from "./screenshot"
 import { ProcessTool } from "./process"
 import { DiskTool } from "./disk"
 import { NetCheckTool } from "./net_check"
+import { SystemInfoTool } from "./system_info"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -139,6 +140,7 @@ export const layer: Layer.Layer<
     const processtool = yield* ProcessTool
     const disktool = yield* DiskTool
     const netchecktool = yield* NetCheckTool
+    const systeminfotool = yield* SystemInfoTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -240,6 +242,7 @@ export const layer: Layer.Layer<
           process: Tool.init(processtool),
           disk: Tool.init(disktool),
           net_check: Tool.init(netchecktool),
+          system_info: Tool.init(systeminfotool),
         })
 
         return {
@@ -272,6 +275,7 @@ export const layer: Layer.Layer<
             tool.process,
             tool.disk,
             tool.net_check,
+            tool.system_info,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

@@ -1,0 +1,28 @@
+One-shot system fact lookup. Returns OS, hardware, CPU, RAM, GPU, and network info for the host the agent is running on.
+
+Use this when you need to ground a decision in what kind of machine this is - laptop vs desktop, manufacturer + model, exact GPU and driver, total RAM, etc. - without running multiple shell probes. The classic case: picking the right driver or installer for the host (Dell laptop vs generic desktop, Pascal vs Turing GPU, etc.) where guessing burns time.
+
+Action options (default `summary` covers the most useful subset):
+- `summary` (default): OS + system identity + CPU + memory + GPU. The 80% answer in one call.
+- `os`: OS name/version/arch/hostname/uptime only.
+- `cpu`: CPU model/cores/architecture/speed.
+- `memory`: RAM total/free/percent_used.
+- `system`: Hardware identity - manufacturer, model, chassis_type (laptop/desktop/server), serial.
+- `gpu`: Video controllers - name, driver_version, vram_mb. Multiple entries on hybrid-graphics laptops.
+- `network`: Network interfaces - name, mac, ipv4, ipv6, subnet.
+- `all`: Everything above. Slower, but exhaustive.
+
+Optional `timeout_ms` (1000-30000, default 8000) caps each platform-specific probe so a stuck WMI/lspci call cannot hang the chat.
+
+Notes:
+- This tool only reads. It never modifies system state.
+- Some fields require admin/root to populate fully (e.g. serial number on Linux). Missing fields are reported as `null` rather than failing.
+- On Windows, hardware fields use `Get-CimInstance` (Win32_ComputerSystem, Win32_VideoController, etc.). On Linux, they come from `/sys/class/dmi/id/`, `/proc/cpuinfo`, `/proc/meminfo`, and `lspci -mm` for GPU. On macOS, from `system_profiler SPHardwareDataType -json` and `sysctl`.
+- For deeper disk reporting, use the dedicated `disk` tool. This tool only includes a basic mount summary in `network`/`summary` mode if the platform makes it cheap.
+
+Example uses:
+- Pick the right GPU driver: `{ "action": "summary" }` - returns `system.chassis_type` and `gpu[*].name` so you know if it is a laptop GTX 1050 Ti Mobile (Pascal) vs a desktop card before downloading anything.
+- Decide build target: `{ "action": "cpu" }` - returns `arch` and `cpu_model` for choosing arm64 vs x86_64 binaries.
+- Diagnose memory pressure: `{ "action": "memory" }` - returns total + free + percent_used.
+
+Do NOT use this tool to scan for sensitive data (it does not), to enumerate files, or as a replacement for `bash` when you need to run a custom shell command. It is a fixed, read-only fact lookup.

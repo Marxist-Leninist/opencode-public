@@ -35,6 +35,9 @@ const AVAILABLE_TOOLS = [
   "sg_doctor",
   "screenshot",
   "process",
+  "disk",
+  "net_check",
+  "system_info",
 ]
 
 const AgentCreateCommand = cmd({
