@@ -130,4 +130,35 @@ describe("tool.open", () => {
       }),
     ),
   )
+
+  it.live("asks open permission before launching a local target", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const target = nodePath.join(dir, "report.txt")
+        yield* Effect.promise(() => fs.writeFile(target, "hello"))
+        const calls: Array<Parameters<Tool.Context["ask"]>[0]> = []
+
+        const toolInfo = yield* OpenTool
+        const tool = yield* toolInfo.init()
+        const exit = yield* Effect.exit(
+          tool.execute(
+            { target: "report.txt" },
+            {
+              ...baseCtx,
+              ask: (input) =>
+                Effect.sync(() => {
+                  calls.push(input)
+                  throw new Error("permission probe")
+                }),
+            },
+          ),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.permission).toBe("open")
+        expect(calls[0]!.patterns).toEqual([target])
+      }),
+    ),
+  )
 })

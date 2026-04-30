@@ -1,0 +1,30 @@
+Parse RSS 2.0, Atom 1.0, RDF/RSS 1.0, or JSON Feed 1.x into a normalized object.
+
+Use to extract recent items from a blog/podcast/news feed. Accepts inline `value` content, a local `filePath`, or a remote `url` (HTTP GET). Auto-detects format from the response body.
+
+Parameters:
+- `action` (required):
+  - `parse` - Full normalized parse (feed metadata + items array).
+  - `items` - Just the items array.
+  - `head` - Just the feed-level metadata (title/description/link/author/updated/language/icon).
+  - `latest` - The first N items (default 10).
+  - `format` - Detect feed format only (returns `rss` | `atom` | `rdf` | `json` | `unknown`).
+
+Source (one of):
+- `value` - Inline feed body (XML or JSON text).
+- `filePath` - File on disk.
+- `url` - HTTP(S) URL to fetch (max 5 MiB body).
+
+Other parameters:
+- `limit` - Max items to return for `items`/`latest` (default 10 for latest, 200 for items, hard cap 500).
+- `headers` - Extra HTTP headers as object (url mode).
+- `timeout_ms` - HTTP timeout (default 15000).
+
+Output (parse):
+```
+{
+  "format": "rss" | "atom" | "rdf" | "json",
+  "feed": { "title", "subtitle", "link", "self_link", "author", "language", "updated", "icon", "categories" },
+  "items": [{ "id", "title", "link", "summary", "content", "author", "categories", "published", "updated", "enclosures": [{url, type, length}] }]
+}
+```

@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite"
 import { Effect, Schema } from "effect"
 import * as path from "node:path"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -55,6 +54,18 @@ export const Parameters = Schema.Struct({
 type Params = Schema.Schema.Type<typeof Parameters>
 type Action = (typeof ACTIONS)[number]
 type FormatMode = (typeof FORMATS)[number]
+type SqliteRunResult = { changes?: number | bigint; lastInsertRowid?: number | bigint }
+type SqliteStatement = {
+  all: (...args: any[]) => Record<string, unknown>[]
+  get: (...args: any[]) => Record<string, unknown> | undefined
+  run: (...args: any[]) => SqliteRunResult
+}
+type SqliteDatabase = {
+  exec: (sql: string) => unknown
+  query: (sql: string) => SqliteStatement
+  prepare: (sql: string) => SqliteStatement
+  close: () => void
+}
 
 type Metadata = {
   action: Action
@@ -122,14 +133,45 @@ function bindParams(params: unknown): Record<string, unknown> | unknown[] | unde
   return [params]
 }
 
-function openDb(target: string, writable: boolean, busyTimeoutMs: number): Database {
-  const db = new Database(target, writable ? {} : { readonly: true, create: false })
+async function openDb(target: string, writable: boolean, busyTimeoutMs: number): Promise<SqliteDatabase> {
+  const db = isBunRuntime()
+    ? await openBunDb(target, writable)
+    : await openNodeDb(target, writable, busyTimeoutMs)
   try {
     db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`)
   } catch {
-    // PRAGMA may fail silently on some bun:sqlite builds; not fatal.
+    // PRAGMA may fail silently on some SQLite builds; not fatal.
   }
   return db
+}
+
+function isBunRuntime() {
+  return typeof (globalThis as any).Bun?.version === "string"
+}
+
+async function openBunDb(target: string, writable: boolean): Promise<SqliteDatabase> {
+  const specifier = "bun" + ":sqlite"
+  const { Database } = (await import(specifier)) as {
+    Database: new (path: string, options?: Record<string, unknown>) => SqliteDatabase
+  }
+  return new Database(target, writable ? {} : { readonly: true, create: false })
+}
+
+async function openNodeDb(target: string, writable: boolean, busyTimeoutMs: number): Promise<SqliteDatabase> {
+  const { DatabaseSync } = (await import("node:sqlite")) as {
+    DatabaseSync: new (path: string, options?: { readOnly?: boolean; timeout?: number }) => {
+      exec: (sql: string) => unknown
+      prepare: (sql: string) => SqliteStatement
+      close: () => void
+    }
+  }
+  const db = new DatabaseSync(target, { readOnly: !writable, timeout: busyTimeoutMs })
+  return {
+    exec: (sql) => db.exec(sql),
+    query: (sql) => db.prepare(sql),
+    prepare: (sql) => db.prepare(sql),
+    close: () => db.close(),
+  }
 }
 
 export const SqliteTool = Tool.define(
@@ -176,7 +218,7 @@ export const SqliteTool = Tool.define(
 
           const start = Date.now()
           const writable = isWrite || params.write_mode === true
-          const db = openDb(target, writable, busyTimeoutMs)
+          const db = yield* Effect.promise(() => openDb(target, writable, busyTimeoutMs))
           try {
             if (action === "query") {
               if (!params.sql || params.sql.trim().length === 0) {

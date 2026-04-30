@@ -58,6 +58,9 @@ import { MimeTool } from "./mime"
 import { ColorTool } from "./color"
 import { UnicodeTool } from "./unicode"
 import { BenchTool } from "./bench"
+import { CidrTool } from "./cidr"
+import { WhoisTool } from "./whois"
+import { FeedTool } from "./feed"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -207,6 +210,9 @@ export const layer: Layer.Layer<
     const colortool = yield* ColorTool
     const unicodetool = yield* UnicodeTool
     const benchtool = yield* BenchTool
+    const cidrtool = yield* CidrTool
+    const whoistool = yield* WhoisTool
+    const feedtool = yield* FeedTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -342,6 +348,9 @@ export const layer: Layer.Layer<
           color: Tool.init(colortool),
           unicode: Tool.init(unicodetool),
           bench: Tool.init(benchtool),
+          cidr: Tool.init(cidrtool),
+          whois: Tool.init(whoistool),
+          feed: Tool.init(feedtool),
         })
 
         return {
@@ -408,6 +417,9 @@ export const layer: Layer.Layer<
             tool.color,
             tool.unicode,
             tool.bench,
+            tool.cidr,
+            tool.whois,
+            tool.feed,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

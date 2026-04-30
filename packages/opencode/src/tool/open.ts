@@ -171,6 +171,18 @@ export const OpenTool = Tool.define(
             kind = stat.type === "Directory" ? "directory" : "file"
           }
 
+          yield* ctx.ask({
+            permission: "open",
+            patterns: [kind === "url" ? urlString! : resolved],
+            always: ["*"],
+            metadata: {
+              kind,
+              target: kind === "url" ? urlString! : resolved,
+              reveal_in_folder: reveal,
+              reason: params.reason,
+            },
+          })
+
           const launcher = platformLauncher(resolved, reveal && kind === "file", kind, platform)
           yield* ctx.metadata({
             title: `open: ${kind === "url" ? urlString : path.basename(resolved)}`,

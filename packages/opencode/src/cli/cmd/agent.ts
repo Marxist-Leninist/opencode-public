@@ -71,6 +71,9 @@ const AVAILABLE_TOOLS = [
   "color",
   "unicode",
   "bench",
+  "cidr",
+  "whois",
+  "feed",
 ]
 
 const AgentCreateCommand = cmd({

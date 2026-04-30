@@ -1,0 +1,17 @@
+Look up domain or IP whois records.
+
+Use when you need registration metadata for a domain (registrar, registrant, NS, expiry) or an IP block (allocator, owner). Performs a TCP query against the appropriate whois server (port 43, plaintext, RFC 3912), follows the standard "ReferralServer:" / "Whois Server:" / "refer:" hops up to a few times to land on the authoritative record, and returns the raw response plus a small parsed summary of common fields.
+
+Parameters:
+- `query` (required) - Domain (`example.com`), full URL (host extracted), IP (`8.8.8.8`), CIDR (`192.0.2.0/24`), or AS number (`AS15169`).
+- `server` (optional) - Whois server hostname (default: chosen by query type - `whois.iana.org` for unknown TLDs/IPs, then follow referrals).
+- `port` (optional) - TCP port (default 43).
+- `follow_referrals` (optional) - Whether to follow ReferralServer hops. Default true.
+- `max_hops` (optional) - Hard cap on referral hops, including initial. Default 4.
+- `timeout_ms` (optional) - Per-hop TCP timeout. Default 8000.
+- `raw_only` (optional) - If true, skip parsing and return only the joined raw text.
+
+Output includes:
+- `summary` - Best-effort `key: value` parse of common fields (Registrar, Domain Name, Creation Date, Expiry/Registry Expiry Date, Updated Date, Status, Name Server, Registrant, Country, NetRange, OrgName, ASN, etc.).
+- `hops` - Each `{ server, port, latency_ms, length, error? }`.
+- `raw` - Full concatenated raw text from all hops, separated by `--- via SERVER ---` headers.

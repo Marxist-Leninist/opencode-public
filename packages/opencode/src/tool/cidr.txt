@@ -1,0 +1,30 @@
+IPv4 / IPv6 / CIDR utilities - parse, validate, expand, range, contains, subnet split.
+
+Use when working with networks: validating an IP, computing subnet boundaries, checking whether one CIDR contains another, splitting a /24 into /26s, or formatting/expanding IPv6 forms.
+
+Parameters:
+- `action` (required):
+  - `parse` - Parse an IP or CIDR; returns family/version, normalized form, prefix length, network address, broadcast (v4), first/last host, total/usable host count.
+  - `validate` - Boolean valid IP, IP+optional CIDR, or pure CIDR (set `kind`).
+  - `expand` - Expand IPv6 to full 8x4-hex form (no `::` shorthand).
+  - `compress` - Compress IPv6 to `::` shorthand form (RFC 5952).
+  - `to_int` - Convert IPv4 to 32-bit integer (string for IPv6 - 128-bit BigInt as decimal).
+  - `from_int` - Build IPv4 from `value` integer; for IPv6 set `family: "ipv6"` and pass decimal `value`.
+  - `contains` - Whether CIDR `value` (a/N) contains `target` (IP or smaller CIDR).
+  - `overlaps` - Whether two CIDRs overlap.
+  - `range` - Network/broadcast/first/last host for a CIDR; `count` action returns total + usable host counts.
+  - `count` - Host counts (total, usable) for a CIDR.
+  - `subnets` - Split a CIDR into all subnets at `new_prefix` length (must be >= existing prefix). Caps at 65536 subnets.
+  - `supernet` - Compute the supernet at `new_prefix` (must be <= existing prefix).
+  - `summarize` - Summarize a list of CIDRs (`list`) into the smallest set of aggregate CIDRs.
+  - `is_private` - RFC1918 / link-local / loopback / ULA / etc. (returns scope label).
+  - `is_public` - Inverse of all reserved/private/loopback/multicast.
+  - `family` - Returns `ipv4` or `ipv6` for the given value.
+
+Common parameters:
+- `value` - IP, CIDR, or integer/string depending on action.
+- `target` - IP or CIDR for contains/overlaps.
+- `new_prefix` - Target prefix length for subnets/supernet.
+- `list` - Array of CIDRs (summarize).
+- `family` - `ipv4` or `ipv6` for from_int.
+- `kind` - `ip` | `ip_or_cidr` | `cidr` for validate (default `ip_or_cidr`).
