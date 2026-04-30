@@ -1,6 +1,5 @@
 import type { Config } from "@opencode-ai/sdk/v2/client"
 import { Button } from "@opencode-ai/ui/button"
-import { Icon } from "@opencode-ai/ui/icon"
 import { Select } from "@opencode-ai/ui/select"
 import { Switch } from "@opencode-ai/ui/switch"
 import { Tag } from "@opencode-ai/ui/tag"
@@ -40,6 +39,8 @@ type AnyMcpEntry = {
   headers?: Record<string, string>
   oauth?: unknown
 }
+
+type AddServerType = "remote" | "local"
 
 const searchModes: Array<{ value: DeferredMode; label: string; description: string }> = [
   { value: "smart", label: "Smart", description: "Local ranking, no model spend" },
@@ -84,6 +85,78 @@ function validateRemoteURL(value: string) {
   return trimmed
 }
 
+function parseCommand(value: string) {
+  const args: string[] = []
+  let current = ""
+  let quote: '"' | "'" | undefined
+  let escaping = false
+
+  for (const char of value.trim()) {
+    if (escaping) {
+      current += char
+      escaping = false
+      continue
+    }
+    if (quote === '"' && char === "\\") {
+      escaping = true
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = undefined
+      else current += char
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        args.push(current)
+        current = ""
+      }
+      continue
+    }
+    current += char
+  }
+
+  if (escaping) current += "\\"
+  if (quote) throw new Error("Command has an unmatched quote.")
+  if (current) args.push(current)
+  if (args.length === 0) throw new Error("Local MCP command is required.")
+  return args
+}
+
+function parseEnvironment(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+
+  if (trimmed.startsWith("{")) {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error("Environment JSON must be an object.")
+    }
+    const result: Record<string, string> = {}
+    for (const [key, envValue] of Object.entries(parsed)) {
+      if (typeof envValue !== "string") throw new Error(`Environment value for ${key} must be a string.`)
+      result[key] = envValue
+    }
+    return Object.keys(result).length > 0 ? result : undefined
+  }
+
+  const result: Record<string, string> = {}
+  for (const line of value.split(/\r?\n/)) {
+    const trimmedLine = line.trim()
+    if (!trimmedLine) continue
+    const separator = trimmedLine.indexOf("=")
+    if (separator <= 0) throw new Error("Environment lines must use KEY=value.")
+    const key = trimmedLine.slice(0, separator).trim()
+    if (!key) throw new Error("Environment key is required.")
+    result[key] = trimmedLine.slice(separator + 1)
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 function serverSummary(entry: AnyMcpEntry) {
   if (entry.type === "remote") return entry.url ?? "Remote URL not set"
   if (entry.type === "local") return entry.command?.join(" ") || "Local command not set"
@@ -112,8 +185,11 @@ export const SettingsMcp: Component = () => {
   const [state, setState] = createStore({
     pending: "",
     add: {
+      type: "remote" as AddServerType,
       name: "",
       url: "",
+      command: "",
+      environment: "",
       timeout: "30000",
       enabled: true,
       defer: true,
@@ -228,7 +304,7 @@ export const SettingsMcp: Component = () => {
     }
   }
 
-  const addRemote = async () => {
+  const addServer = async () => {
     const name = state.add.name.trim()
     if (!/^[A-Za-z0-9_-]+$/.test(name)) {
       showToast({
@@ -243,11 +319,27 @@ export const SettingsMcp: Component = () => {
       return
     }
 
-    let url: string
     let timeout: number | undefined
+    let entry: AnyMcpEntry
     try {
-      url = validateRemoteURL(state.add.url)
       timeout = parseTimeout(state.add.timeout)
+      if (state.add.type === "remote") {
+        entry = {
+          type: "remote",
+          url: validateRemoteURL(state.add.url),
+          enabled: state.add.enabled,
+          defer: state.add.defer,
+        }
+      } else {
+        const environment = parseEnvironment(state.add.environment)
+        entry = {
+          type: "local",
+          command: parseCommand(state.add.command),
+          enabled: state.add.enabled,
+          defer: state.add.defer,
+        }
+        if (environment) entry.environment = environment
+      }
     } catch (err) {
       showToast({
         variant: "error",
@@ -255,13 +347,6 @@ export const SettingsMcp: Component = () => {
         description: err instanceof Error ? err.message : String(err),
       })
       return
-    }
-
-    const entry: AnyMcpEntry = {
-      type: "remote",
-      url,
-      enabled: state.add.enabled,
-      defer: state.add.defer,
     }
     if (timeout !== undefined) entry.timeout = timeout
 
@@ -275,8 +360,11 @@ export const SettingsMcp: Component = () => {
     )
 
     setState("add", {
+      type: state.add.type,
       name: "",
       url: "",
+      command: "",
+      environment: "",
       timeout: "30000",
       enabled: true,
       defer: true,
@@ -565,12 +653,36 @@ export const SettingsMcp: Component = () => {
           class="flex flex-col gap-1"
           onSubmit={(event) => {
             event.preventDefault()
-            void addRemote()
+            void addServer()
           }}
         >
-          <h3 class="text-14-medium text-text-strong pb-2">Add remote server</h3>
+          <h3 class="text-14-medium text-text-strong pb-2">Add server</h3>
           <SettingsList>
             <div class="flex flex-col gap-3 py-4">
+              <div class="inline-flex rounded-md border border-border-base bg-surface-base overflow-hidden self-start">
+                <button
+                  type="button"
+                  class="h-8 px-3 text-12-medium border-0 border-r border-border-base"
+                  classList={{
+                    "bg-surface-raised text-text-strong": state.add.type === "remote",
+                    "bg-transparent text-text-base hover:bg-surface-base-hover": state.add.type !== "remote",
+                  }}
+                  onClick={() => setState("add", "type", "remote")}
+                >
+                  Remote
+                </button>
+                <button
+                  type="button"
+                  class="h-8 px-3 text-12-medium border-0"
+                  classList={{
+                    "bg-surface-raised text-text-strong": state.add.type === "local",
+                    "bg-transparent text-text-base hover:bg-surface-base-hover": state.add.type !== "local",
+                  }}
+                  onClick={() => setState("add", "type", "local")}
+                >
+                  Local
+                </button>
+              </div>
               <div class="grid grid-cols-1 gap-2 sm:grid-cols-[180px_minmax(0,1fr)_120px]">
                 <TextField
                   label="MCP name"
@@ -584,18 +696,36 @@ export const SettingsMcp: Component = () => {
                   autocapitalize="off"
                   class="text-12-regular"
                 />
-                <TextField
-                  label="Remote MCP URL"
-                  hideLabel
-                  value={state.add.url}
-                  onChange={(value) => setState("add", "url", value)}
-                  placeholder="https://mcp.example.com/mcp/sse"
-                  spellcheck={false}
-                  autocorrect="off"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  class="text-12-regular"
-                />
+                <Show
+                  when={state.add.type === "remote"}
+                  fallback={
+                    <TextField
+                      label="Local MCP command"
+                      hideLabel
+                      value={state.add.command}
+                      onChange={(value) => setState("add", "command", value)}
+                      placeholder='node "C:\path\server.js" --stdio'
+                      spellcheck={false}
+                      autocorrect="off"
+                      autocomplete="off"
+                      autocapitalize="off"
+                      class="text-12-regular"
+                    />
+                  }
+                >
+                  <TextField
+                    label="Remote MCP URL"
+                    hideLabel
+                    value={state.add.url}
+                    onChange={(value) => setState("add", "url", value)}
+                    placeholder="https://mcp.example.com/mcp/sse"
+                    spellcheck={false}
+                    autocorrect="off"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    class="text-12-regular"
+                  />
+                </Show>
                 <TextField
                   label="Timeout"
                   hideLabel
@@ -606,6 +736,16 @@ export const SettingsMcp: Component = () => {
                   class="text-12-regular"
                 />
               </div>
+              <Show when={state.add.type === "local"}>
+                <textarea
+                  value={state.add.environment}
+                  onInput={(event) => setState("add", "environment", event.currentTarget.value)}
+                  placeholder={"Environment, one KEY=value per line, or JSON object"}
+                  spellcheck={false}
+                  autocomplete="off"
+                  class="min-h-[72px] resize-y rounded-md border border-border-base bg-surface-base px-3 py-2 text-12-regular text-text-base outline-none focus:border-border-active"
+                />
+              </Show>
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex flex-wrap items-center gap-5">
                   <label class="flex items-center gap-2 text-12-regular text-text-base">
@@ -623,13 +763,6 @@ export const SettingsMcp: Component = () => {
               </div>
             </div>
           </SettingsList>
-          <div class="flex items-start gap-2 pt-2 text-12-regular text-text-weak">
-            <Icon name="help" size="small" />
-            <span>
-              For local stdio servers, edit the config file directly so command arguments and environment variables
-              stay explicit. This panel will still show local servers and let you enable, defer, or tune timeout.
-            </span>
-          </div>
         </form>
       </div>
     </div>

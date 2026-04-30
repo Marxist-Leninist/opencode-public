@@ -9,6 +9,7 @@ import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 import { SettingsMcp } from "./settings-mcp"
+import { SettingsPlugins } from "./settings-plugins"
 import { SettingsPersonalization } from "./settings-personalization"
 
 export const DialogSettings: Component = () => {
@@ -55,6 +56,10 @@ export const DialogSettings: Component = () => {
                       <Icon name="mcp" />
                       {language.t("settings.mcp.title")}
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="plugins">
+                      <Icon name="branch" />
+                      Plugins
+                    </Tabs.Trigger>
                   </div>
                 </div>
               </div>
@@ -82,6 +87,9 @@ export const DialogSettings: Component = () => {
         </Tabs.Content>
         <Tabs.Content value="mcp" class="no-scrollbar">
           <SettingsMcp />
+        </Tabs.Content>
+        <Tabs.Content value="plugins" class="no-scrollbar">
+          <SettingsPlugins />
         </Tabs.Content>
       </Tabs>
     </Dialog>
