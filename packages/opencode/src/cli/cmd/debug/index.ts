@@ -10,6 +10,7 @@ import { SkillCommand } from "./skill"
 import { SnapshotCommand } from "./snapshot"
 import { AgentCommand } from "./agent"
 import { StartupCommand } from "./startup"
+import { ToolsCommand } from "./tools"
 
 export const DebugCommand = cmd({
   command: "debug",
@@ -25,6 +26,7 @@ export const DebugCommand = cmd({
       .command(SnapshotCommand)
       .command(StartupCommand)
       .command(AgentCommand)
+      .command(ToolsCommand)
       .command(PathsCommand)
       .command({
         command: "wait",
