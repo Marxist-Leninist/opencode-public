@@ -61,6 +61,11 @@ import { BenchTool } from "./bench"
 import { CidrTool } from "./cidr"
 import { WhoisTool } from "./whois"
 import { FeedTool } from "./feed"
+import { DnsTool } from "./dns"
+import { KdfTool } from "./kdf"
+import { LuhnTool } from "./luhn"
+import { PortScanTool } from "./port_scan"
+import { AudioTool } from "./audio"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -213,6 +218,11 @@ export const layer: Layer.Layer<
     const cidrtool = yield* CidrTool
     const whoistool = yield* WhoisTool
     const feedtool = yield* FeedTool
+    const dnstool = yield* DnsTool
+    const kdftool = yield* KdfTool
+    const luhntool = yield* LuhnTool
+    const portscantool = yield* PortScanTool
+    const audiotool = yield* AudioTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -351,6 +361,11 @@ export const layer: Layer.Layer<
           cidr: Tool.init(cidrtool),
           whois: Tool.init(whoistool),
           feed: Tool.init(feedtool),
+          dns: Tool.init(dnstool),
+          kdf: Tool.init(kdftool),
+          luhn: Tool.init(luhntool),
+          port_scan: Tool.init(portscantool),
+          audio: Tool.init(audiotool),
         })
 
         return {
@@ -420,6 +435,11 @@ export const layer: Layer.Layer<
             tool.cidr,
             tool.whois,
             tool.feed,
+            tool.dns,
+            tool.kdf,
+            tool.luhn,
+            tool.port_scan,
+            tool.audio,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

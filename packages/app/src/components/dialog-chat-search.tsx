@@ -10,6 +10,12 @@ import { useModels } from "@/context/models"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
 import { useProviders } from "@/hooks/use-providers"
+import {
+  clampChatSearchIndex,
+  moveChatSearchIndex,
+  parseChatSearchModelSelection,
+  splitChatSearchHighlight,
+} from "./dialog-chat-search-utils"
 
 type ChatSearchHit = {
   messageID: string
@@ -46,14 +52,26 @@ type AugmentResponse = SearchResponse & {
     providerID: string
     modelID: string
   }
+  rankedCount?: number
+  source?: "classic" | "rerank" | "semantic"
 }
 
 type Mode = "classic" | "ai"
 
-const CHAT_SEARCH_PRESET_MODEL = {
-  providerID: "openrouter",
-  modelID: "openrouter/auto",
-} as const
+const CHAT_SEARCH_MODEL_OPTIONS = [
+  {
+    providerID: "openrouter",
+    modelID: "openrouter/auto@preset/latency",
+  },
+  {
+    providerID: "openrouter",
+    modelID: "openrouter/free@preset/latency",
+  },
+  {
+    providerID: "openrouter",
+    modelID: "inception/mercury-2",
+  },
+] as const
 
 export function DialogChatSearch(props: { initialDirectory?: string }) {
   const dialog = useDialog()
@@ -64,21 +82,57 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   const models = useModels()
   const providers = useProviders()
 
+  const STORAGE_MODE = "opencode.chatSearch.mode"
+  const STORAGE_MODEL = "opencode.chatSearch.model"
+
+  const persistedMode = (): Mode => {
+    try {
+      const v = localStorage.getItem(STORAGE_MODE)
+      return v === "ai" ? "ai" : "classic"
+    } catch {
+      return "classic"
+    }
+  }
+  const persistedModel = (): string => {
+    try {
+      return localStorage.getItem(STORAGE_MODEL) ?? ""
+    } catch {
+      return ""
+    }
+  }
+
   const [query, setQuery] = createSignal("")
-  const [mode, setMode] = createSignal<Mode>("classic")
+  const [mode, setModeRaw] = createSignal<Mode>(persistedMode())
+  const setMode = (next: Mode) => {
+    try {
+      localStorage.setItem(STORAGE_MODE, next)
+    } catch {}
+    setModeRaw(next)
+  }
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal("")
   const [results, setResults] = createSignal<ChatSearchResult[]>([])
   const [answer, setAnswer] = createSignal("")
   const [aiDebug, setAiDebug] = createSignal("")
-  const [selectedModel, setSelectedModel] = createSignal("")
-  const [selectedModelTouched, setSelectedModelTouched] = createSignal(false)
+  const [selectedModel, setSelectedModelRaw] = createSignal(persistedModel())
+  const setSelectedModel = (next: string) => {
+    if (next) {
+      try {
+        localStorage.setItem(STORAGE_MODEL, next)
+      } catch {}
+    }
+    setSelectedModelRaw(next)
+  }
+  const [selectedModelTouched, setSelectedModelTouched] = createSignal(persistedModel() !== "")
+  const [activeIndex, setActiveIndex] = createSignal(0)
 
-  const chatSearchPreset = createMemo(() => {
-    const provider = providers.all().find((item) => item.id === CHAT_SEARCH_PRESET_MODEL.providerID)
-    const model = provider?.models[CHAT_SEARCH_PRESET_MODEL.modelID]
-    if (!provider || !model) return
-    return { ...model, provider }
+  const chatSearchModelOptions = createMemo(() => {
+    return CHAT_SEARCH_MODEL_OPTIONS.flatMap((option) => {
+      const provider = providers.all().find((item) => item.id === option.providerID)
+      const model = provider?.models[option.modelID]
+      if (!provider || !model) return []
+      return [{ ...model, provider }]
+    })
   })
 
   const visibleModels = createMemo(() => {
@@ -86,11 +140,13 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
       .list()
       .filter((model) => models.visible({ providerID: model.provider.id, modelID: model.id }))
       .sort((a, b) => a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name))
-    const preset = chatSearchPreset()
-    if (!preset) return list
+    const forced = chatSearchModelOptions()
+    if (forced.length === 0) return list
     return [
-      preset,
-      ...list.filter((model) => model.provider.id !== preset.provider.id || model.id !== preset.id),
+      ...forced,
+      ...list.filter(
+        (model) => !forced.some((forcedModel) => model.provider.id === forcedModel.provider.id && model.id === forcedModel.id),
+      ),
     ]
   })
 
@@ -101,7 +157,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
       .map((item) => list.find((model) => model.provider.id === item.providerID && model.id === item.modelID))
       .find(Boolean)
     return (
-      chatSearchPreset() ??
+      chatSearchModelOptions()[0] ??
       list.find((model) => /deepseek/i.test(`${model.provider.name} ${model.name} ${model.id}`)) ??
       list.find((model) => /ring/i.test(`${model.provider.name} ${model.name} ${model.id}`)) ??
       recent ??
@@ -139,12 +195,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   }
 
   function modelBody() {
-    const value = selectedModel()
-    if (!value) return
-    const [providerID, ...rest] = value.split("/")
-    const modelID = rest.join("/")
-    if (!providerID || !modelID) return
-    return { providerID, modelID }
+    return parseChatSearchModelSelection(selectedModel())
   }
 
   function modelLabel(ref?: { providerID: string; modelID: string }) {
@@ -172,6 +223,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
     setBusy(true)
     setError("")
     setAiDebug("")
+    setActiveIndex(0)
     if (nextMode === "classic") setAnswer("")
 
     try {
@@ -181,8 +233,9 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
         const classic = await classicSearch(trimmed)
         setResults(classic.results)
         setAiDebug(
-          `Classic search shown: ${classic.results.length} ${classic.results.length === 1 ? "match" : "matches"}. AI running...`,
+          `Classic: ${classic.results.length} ${classic.results.length === 1 ? "match" : "matches"} shown. AI running...`,
         )
+        const aiStart = performance.now()
         const response = await request<AugmentResponse>("/session/search/augment", {
           method: "POST",
           headers: headers(true),
@@ -193,9 +246,33 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
             model: modelBody(),
           }),
         })
+        const elapsed = ((performance.now() - aiStart) / 1000).toFixed(1)
         setAnswer(response.answer)
-        setResults(response.results)
-        setAiDebug(`AI response received from ${modelLabel(response.model)}.`)
+        const aiResultCount = response.results.length
+        const classicCount = classic.results.length
+        if (aiResultCount > 0) {
+          setResults(response.results)
+          setActiveIndex(0)
+        } else {
+          setAnswer(
+            classicCount > 0 && response.answer.trim().toLowerCase() === "no matching chats found."
+              ? "AI did not return better ranked matches; showing classic search results."
+              : response.answer,
+          )
+          setResults(classic.results)
+          setActiveIndex(0)
+        }
+        const sourceLabel = response.source === "rerank"
+          ? "reranked"
+          : response.source === "semantic"
+          ? "semantic"
+          : "classic"
+        const ranked = response.rankedCount ?? aiResultCount
+        setAiDebug(
+          ranked > 0
+            ? `AI ${sourceLabel} via ${modelLabel(response.model)} in ${elapsed}s - ${ranked} ranked, showing ${aiResultCount} result${aiResultCount === 1 ? "" : "s"}.`
+            : `AI via ${modelLabel(response.model)} in ${elapsed}s - 0 ranked, showing ${classicCount} classic ${classicCount === 1 ? "match" : "matches"}.`,
+        )
         return
       }
 
@@ -241,7 +318,25 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
               autofocus
               value={query()}
               onInput={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Search chat text, tool output, titles..."
+              onKeyDown={(event) => {
+                const list = results()
+                if (event.key === "ArrowDown" && list.length > 0) {
+                  event.preventDefault()
+                  setActiveIndex((i) => moveChatSearchIndex(i, list.length, 1))
+                } else if (event.key === "ArrowUp" && list.length > 0) {
+                  event.preventDefault()
+                  setActiveIndex((i) => moveChatSearchIndex(i, list.length, -1))
+                } else if (event.key === "Enter" && !query().trim() && list.length > 0) {
+                  event.preventDefault()
+                  const target = list[activeIndex()]
+                  if (target) openResult(target)
+                } else if (event.key === "Enter" && list.length > 0 && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault()
+                  const target = list[activeIndex()]
+                  if (target) openResult(target)
+                }
+              }}
+              placeholder="Search chat text, tool output, titles... (↑/↓ navigate, Ctrl+Enter open)"
               class="w-full h-10 pl-10 pr-3 rounded-md border border-border-base bg-surface-base text-14-regular text-text-strong outline-none focus:border-border-strong"
             />
           </div>
@@ -330,27 +425,48 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
             }
           >
             <For each={results()}>
-              {(result) => (
+              {(result, index) => (
                 <button
                   type="button"
-                  class="w-full text-left p-3 bg-transparent hover:bg-surface-base-hover border-0 flex flex-col gap-2"
+                  class="w-full text-left p-3 bg-transparent border-0 flex flex-col gap-2"
+                  classList={{
+                    "bg-surface-raised": activeIndex() === index(),
+                    "hover:bg-surface-base-hover": activeIndex() !== index(),
+                  }}
                   onClick={() => openResult(result)}
+                  onMouseEnter={() => setActiveIndex(clampChatSearchIndex(index(), results().length))}
                 >
                   <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0 flex items-center gap-2">
                       <Icon name="speech-bubble" />
                       <span class="truncate text-14-medium text-text-strong">{result.session.title}</span>
+                      <Show when={result.hits.length > 0}>
+                        <span class="shrink-0 text-11-regular text-text-weak rounded bg-surface-base px-1.5 py-0.5">
+                          {result.hits.length} {result.hits.length === 1 ? "hit" : "hits"}
+                        </span>
+                      </Show>
                     </div>
                     <span class="shrink-0 text-12-regular text-text-weak">{updated(result)}</span>
                   </div>
                   <div class="text-12-regular text-text-weak truncate">{result.session.directory}</div>
-                  <Show when={result.hits[0]}>
+                  <For each={result.hits.slice(0, 3)}>
                     {(hit) => (
-                      <div class="text-13-regular text-text-base leading-5 line-clamp-3">
-                        <span class="text-text-weak">{hit().role}: </span>
-                        {hit().snippet}
+                      <div class="text-13-regular text-text-base leading-5 line-clamp-2">
+                        <span class="text-text-weak">{hit.role}: </span>
+                        <For each={splitChatSearchHighlight(hit.snippet, query())}>
+                          {(part) => {
+                            return part.match ? (
+                              <mark class="bg-yellow-300/30 text-text-strong rounded px-0.5">{part.text}</mark>
+                            ) : (
+                              <>{part.text}</>
+                            )
+                          }}
+                        </For>
                       </div>
                     )}
+                  </For>
+                  <Show when={result.hits.length > 3}>
+                    <div class="text-11-regular text-text-weak">+{result.hits.length - 3} more hits</div>
                   </Show>
                 </button>
               )}

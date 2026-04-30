@@ -74,6 +74,11 @@ const AVAILABLE_TOOLS = [
   "cidr",
   "whois",
   "feed",
+  "dns",
+  "kdf",
+  "luhn",
+  "port_scan",
+  "audio",
 ]
 
 const AgentCreateCommand = cmd({

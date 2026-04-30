@@ -1,0 +1,29 @@
+Check-digit / identifier validator and generator for several common numeric/alphanumeric formats.
+
+Use when validating user-supplied identifiers (credit card, IMEI, IBAN, ISIN, EAN/UPC barcode, ISBN, VIN suffix, GTIN, etc.) without round-tripping to an external service.
+
+Actions:
+- `validate` - Boolean check that `value` passes its checksum / structural rules. Output `"true"` / `"false"`, plus `metadata.detail` describing what was checked.
+- `compute_check_digit` - Compute the trailing check character given the bare prefix (no check digit yet). Returns the character.
+- `complete` - Append the computed check digit and return the full identifier.
+- `info` - Validate + return parsed metadata: brand (for cards), country (for IBAN), GS1 country prefix (for EAN/UPC), etc.
+
+Schemes (`scheme` parameter, defaults to `auto` which tries to infer):
+- `luhn` - Generic Luhn / mod-10. Used by credit cards and IMEI numbers.
+- `creditcard` - Luhn + brand/length detection (Visa/Mastercard/Amex/Discover/JCB/Diners/UnionPay).
+- `imei` - Luhn over 14 digits, full IMEI is 15 digits including check.
+- `imeisv` - IMEI Software Version (16 digits, no checksum, length-checked).
+- `iban` - ISO 13616 mod-97, 4-letter country + check digits + BBAN. Strips spaces.
+- `isin` - ISO 6166 alphanumeric Luhn-style on letters->digits transform. 12 chars including check.
+- `ean13` / `upca` / `ean8` - GS1 mod-10 weight 1/3 alternation.
+- `isbn10` - Mod-11 (last digit may be `X`).
+- `isbn13` - Same as EAN-13 but enforces 978/979 prefix.
+- `gtin14` - GTIN-14 mod-10.
+
+Common parameters:
+- `value` - The identifier (whitespace + dashes ignored where appropriate).
+- `scheme` - Force a particular scheme. Default `auto`.
+
+Notes:
+- This tool is informational only. It does not call out to any payment processor / banking API and cannot tell whether the account exists or is funded.
+- For privacy, never echo a full credit card back into chat. Mask the middle digits if you display anything beyond `validate`.

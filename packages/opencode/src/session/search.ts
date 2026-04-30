@@ -17,6 +17,49 @@ const MAX_SEMANTIC_HITS = 4
 const MAX_PART_TEXT = 10_000
 const MAX_RESULT_TEXT = 2_000
 const MAX_SNIPPET = 280
+const SEARCH_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "but",
+  "by",
+  "can",
+  "do",
+  "does",
+  "did",
+  "for",
+  "from",
+  "how",
+  "i",
+  "if",
+  "in",
+  "is",
+  "it",
+  "me",
+  "my",
+  "of",
+  "on",
+  "or",
+  "so",
+  "that",
+  "the",
+  "this",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "with",
+  "you",
+  "your",
+])
 
 export namespace SessionSearch {
   export const Input = z.object({
@@ -68,6 +111,8 @@ export namespace SessionSearch {
     answer: z.string(),
     model: Model,
     results: z.array(Result),
+    rankedCount: z.number().int().min(0).optional(),
+    source: z.enum(["classic", "rerank", "semantic"]).optional(),
   })
   export type AugmentResponse = z.infer<typeof AugmentResponse>
 
@@ -76,10 +121,12 @@ export namespace SessionSearch {
   }
 
   export function terms(input: string) {
-    return normalize(input)
+    const tokens = normalize(input)
       .split(" ")
       .map((item) => item.trim())
       .filter((item) => item.length >= 2)
+    const filtered = tokens.filter((item) => !SEARCH_STOPWORDS.has(item))
+    return filtered.length > 0 ? filtered : tokens
   }
 
   function trimText(input: string, max: number) {
@@ -253,21 +300,6 @@ export namespace SessionSearch {
     }
   })
 
-  function buildContext(results: Result[]) {
-    return results.slice(0, 10).map((result, index) => ({
-      rank: index + 1,
-      sessionID: result.session.id,
-      title: result.session.title,
-      directory: result.session.directory,
-      updated: new Date(result.session.time.updated).toISOString(),
-      hits: result.hits.slice(0, 4).map((hit) => ({
-        role: hit.role,
-        type: hit.type,
-        snippet: hit.snippet.slice(0, 500),
-      })),
-    }))
-  }
-
   function buildSemanticContext(results: Result[]) {
     return results.slice(0, MAX_SEMANTIC_CANDIDATES).map((result, index) => ({
       rank: index + 1,
@@ -281,6 +313,34 @@ export namespace SessionSearch {
         snippet: hit.snippet.slice(0, 500),
       })),
     }))
+  }
+
+  function orderedResults(input: {
+    candidates: Result[]
+    sessionIDs: string[]
+    limit: number
+    appendRemaining: boolean
+  }) {
+    const byID = new Map<string, Result>(input.candidates.map((candidate) => [candidate.session.id, candidate]))
+    const seen = new Set<string>()
+    const ordered: Result[] = []
+
+    for (const sessionID of input.sessionIDs) {
+      const candidate = byID.get(sessionID)
+      if (!candidate || seen.has(sessionID)) continue
+      seen.add(sessionID)
+      ordered.push(candidate)
+    }
+
+    if (input.appendRemaining) {
+      for (const candidate of input.candidates) {
+        if (seen.has(candidate.session.id)) continue
+        seen.add(candidate.session.id)
+        ordered.push(candidate)
+      }
+    }
+
+    return ordered.slice(0, input.limit)
   }
 
   function jsonObjectCandidates(text: string) {
@@ -328,26 +388,38 @@ export namespace SessionSearch {
 
   export function parseSemanticResult(text: string, validIDs: Set<string>) {
     const fallback = text.trim()
+    const mentionsID = (source: string, id: string) =>
+      new RegExp(`(^|[^A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z0-9_-])`).test(source)
 
     for (const candidate of jsonObjectCandidates(text)) {
       try {
         const parsed = JSON.parse(candidate) as { answer?: unknown; sessionIDs?: unknown }
         const seen = new Set<string>()
+        const sessionIDs = Array.isArray(parsed.sessionIDs)
+          ? parsed.sessionIDs.filter((item): item is string => {
+              if (typeof item !== "string" || !validIDs.has(item) || seen.has(item)) return false
+              seen.add(item)
+              return true
+            })
+          : []
+        if (sessionIDs.length === 0) {
+          for (const id of validIDs) {
+            if (!mentionsID(candidate, id) || seen.has(id)) continue
+            seen.add(id)
+            sessionIDs.push(id)
+          }
+        }
         return {
           answer: typeof parsed.answer === "string" ? parsed.answer.trim() : fallback,
-          sessionIDs: Array.isArray(parsed.sessionIDs)
-            ? parsed.sessionIDs.filter((item): item is string => {
-                if (typeof item !== "string" || !validIDs.has(item) || seen.has(item)) return false
-                seen.add(item)
-                return true
-              })
-            : [],
+          sessionIDs,
         }
       } catch {
         continue
       }
     }
 
+    const mentioned = [...validIDs].filter((id) => mentionsID(text, id))
+    if (mentioned.length > 0) return { answer: fallback, sessionIDs: mentioned }
     return { answer: fallback, sessionIDs: [] as string[] }
   }
 
@@ -390,82 +462,38 @@ export namespace SessionSearch {
     return results.slice(0, MAX_SEMANTIC_CANDIDATES)
   })
 
-  export const augment = Effect.fn("SessionSearch.augment")(function* (input: AugmentInput) {
-    const response = yield* search(input)
+  type ModelRef = z.infer<typeof Model>
+  type RankingMode = "rerank" | "semantic"
+
+  const rankCandidates = Effect.fn("SessionSearch.rankCandidates")(function* (input: {
+    query: string
+    candidates: Result[]
+    model: ModelRef
+    mode: RankingMode
+  }) {
     const provider = yield* Provider.Service
-    const ref = input.model ?? (yield* provider.defaultModel())
-
-    if (response.results.length === 0) {
-      const candidates = yield* semanticCandidates(input)
-      if (candidates.length > 0) {
-        const model = yield* provider.getModel(ref.providerID, ref.modelID)
-        const language = yield* provider.getLanguage(model)
-        const generated = yield* Effect.tryPromise({
-          try: () =>
-            generateText({
-              model: language,
-              temperature: 0,
-              maxOutputTokens: 700,
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    'You search prior OpenCode chats. Use only the provided candidate previews. Return strict JSON with shape {"answer":"...","sessionIDs":["..."]}. Include only genuinely relevant sessionIDs, ordered by relevance. If nothing is relevant, return an empty sessionIDs array.',
-                },
-                {
-                  role: "user",
-                  content: JSON.stringify({
-                    query: response.query,
-                    candidates: buildSemanticContext(candidates),
-                  }),
-                },
-              ],
-            }),
-          catch: (cause) => cause,
-        })
-        const parsed = parseSemanticResult(
-          generated.text,
-          new Set(candidates.map((candidate) => candidate.session.id)),
-        )
-        const ranked = parsed.sessionIDs
-          .map((sessionID) => candidates.find((candidate) => candidate.session.id === sessionID))
-          .filter((candidate): candidate is Result => Boolean(candidate))
-
-        return {
-          query: response.query,
-          answer: parsed.answer || "No matching chats found.",
-          model: ref,
-          results: ranked.slice(0, input.limit ?? DEFAULT_LIMIT),
-        }
-      }
-
-      return {
-        query: response.query,
-        answer: "No matching chats found.",
-        model: ref,
-        results: response.results,
-      }
-    }
-
-    const model = yield* provider.getModel(ref.providerID, ref.modelID)
+    const model = yield* provider.getModel(input.model.providerID, input.model.modelID)
     const language = yield* provider.getLanguage(model)
+    const validIDs = new Set(input.candidates.map((candidate) => candidate.session.id))
     const generated = yield* Effect.tryPromise({
       try: () =>
         generateText({
           model: language,
           temperature: 0,
-          maxOutputTokens: 700,
+          maxOutputTokens: 2000,
           messages: [
             {
               role: "system",
               content:
-                "You search prior OpenCode chats. Answer only from the provided search hits. Be concise, cite session titles when useful, and say when the hits do not contain enough evidence.",
+                input.mode === "rerank"
+                  ? 'You rerank prior OpenCode chat search results. Use only the provided candidates. Return strict JSON with shape {"answer":"...","sessionIDs":["..."]}. Copy sessionID strings exactly from candidates; do not use ranks, titles, or rewritten IDs. Put the best matching sessions first. Ignore candidates that only match common words like "are", "you", "the", or "what". For conversational queries, include plausible greeting/status/introduction chats even when wording differs. Return empty sessionIDs only when no candidate is plausibly relevant.'
+                  : 'You search prior OpenCode chats. Use only the provided candidate previews. Return strict JSON with shape {"answer":"...","sessionIDs":["..."]}. Copy sessionID strings exactly from candidates; do not use ranks, titles, or rewritten IDs. Prefer recall over precision: include any session with a plausible semantic, topical, or conversational connection to the query. For example "hi", "hello", "what up", "what are you doing", "greeting", and "say hello" can match a session titled "Greeting". Order by descending relevance. Return empty sessionIDs only when no candidate has any plausible connection.',
             },
             {
               role: "user",
               content: JSON.stringify({
-                query: response.query,
-                results: buildContext(response.results),
+                query: input.query,
+                candidates: buildSemanticContext(input.candidates),
               }),
             },
           ],
@@ -473,11 +501,106 @@ export namespace SessionSearch {
       catch: (cause) => cause,
     })
 
+    return parseSemanticResult(generated.text, validIDs)
+  })
+
+  export const augment = Effect.fn("SessionSearch.augment")(function* (input: AugmentInput) {
+    const response = yield* search(input)
+    const provider = yield* Provider.Service
+    const ref = input.model ?? (yield* provider.defaultModel())
+    const limit = input.limit ?? DEFAULT_LIMIT
+
+    if (response.results.length > 0) {
+      const reranked = yield* rankCandidates({
+        query: response.query,
+        candidates: response.results,
+        model: ref,
+        mode: "rerank",
+      })
+
+      if (reranked.sessionIDs.length > 0) {
+        return {
+          query: response.query,
+          answer: reranked.answer || "AI reranked the classic search results.",
+          model: ref,
+          results: orderedResults({
+            candidates: response.results,
+            sessionIDs: reranked.sessionIDs,
+            limit,
+            appendRemaining: true,
+          }),
+          rankedCount: reranked.sessionIDs.length,
+          source: "rerank" as const,
+        }
+      }
+
+      const semanticCandidatesList = yield* semanticCandidates(input)
+      if (semanticCandidatesList.length > 0) {
+        const semantic = yield* rankCandidates({
+          query: response.query,
+          candidates: semanticCandidatesList,
+          model: ref,
+          mode: "semantic",
+        })
+
+        if (semantic.sessionIDs.length > 0) {
+          return {
+            query: response.query,
+            answer: semantic.answer || "AI found semantic matches outside the classic ranking.",
+            model: ref,
+            results: orderedResults({
+              candidates: semanticCandidatesList,
+              sessionIDs: semantic.sessionIDs,
+              limit,
+              appendRemaining: false,
+            }),
+            rankedCount: semantic.sessionIDs.length,
+            source: "semantic" as const,
+          }
+        }
+      }
+
+      return {
+        query: response.query,
+        answer: reranked.answer || "AI did not find a stronger semantic ranking; showing classic search results.",
+        model: ref,
+        results: response.results,
+        rankedCount: 0,
+        source: "classic" as const,
+      }
+    }
+
+    const semanticCandidatesList = yield* semanticCandidates(input)
+    if (semanticCandidatesList.length > 0) {
+      const semantic = yield* rankCandidates({
+        query: response.query,
+        candidates: semanticCandidatesList,
+        model: ref,
+        mode: "semantic",
+      })
+
+      return {
+        query: response.query,
+        answer: semantic.answer || "No matching chats found.",
+        model: ref,
+        results: orderedResults({
+          candidates: semanticCandidatesList,
+          sessionIDs: semantic.sessionIDs,
+          limit,
+          appendRemaining: false,
+        }),
+        rankedCount: semantic.sessionIDs.length,
+        source: semantic.sessionIDs.length > 0 ? ("semantic" as const) : ("classic" as const),
+      }
+    }
+
     return {
       query: response.query,
-      answer: generated.text.trim(),
+      answer: "No matching chats found.",
       model: ref,
       results: response.results,
+      rankedCount: 0,
+      source: "classic" as const,
     }
   })
 }

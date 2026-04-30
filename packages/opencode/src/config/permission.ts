@@ -38,6 +38,8 @@ const InputObject = Schema.StructWithRest(
     codesearch: Schema.optional(Action),
     open: Schema.optional(Rule),
     whois: Schema.optional(Rule),
+    dns: Schema.optional(Rule),
+    port_scan: Schema.optional(Rule),
     lsp: Schema.optional(Rule),
     doom_loop: Schema.optional(Action),
     skill: Schema.optional(Rule),

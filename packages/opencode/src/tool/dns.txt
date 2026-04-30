@@ -1,0 +1,34 @@
+DNS lookup tool - query A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, SOA, NAPTR, CAA, ANY records for a hostname or perform reverse lookup. Use when net_check's basic A/AAAA lookup is not enough - e.g. checking SPF/DKIM TXT records, verifying mail (MX) routing, finding nameservers, or doing reverse PTR lookups for IPs.
+
+Parameters:
+- `action` (required):
+  - `lookup` - Resolve `host` for record `type` (default `A`). Returns sorted, normalized records.
+  - `reverse` - PTR lookup for an `ip` (IPv4 or IPv6). Returns hostnames.
+  - `resolve_all` - Convenience: resolves the most useful record types in parallel for `host` (A, AAAA, MX, TXT, NS, CNAME, SOA, CAA). Each per-type failure is reported but does not abort siblings.
+
+Type-specific behavior under `lookup`:
+- `A` - IPv4 addresses, sorted lexicographically.
+- `AAAA` - IPv6 addresses, sorted lexicographically.
+- `CNAME` - Canonical name targets.
+- `MX` - `{ priority, exchange }` records, sorted by priority asc, then exchange asc.
+- `TXT` - Each TXT record joined to a single string (Node already returns string[][]).
+- `NS` - Authoritative nameservers, sorted.
+- `PTR` - Reverse pointer (use `reverse` action with `ip` instead, this is its low-level form).
+- `SOA` - Start-of-authority (`nsname`, `hostmaster`, `serial`, `refresh`, `retry`, `expire`, `minttl`).
+- `SRV` - `{ priority, weight, port, name }`, sorted by priority asc, weight desc.
+- `NAPTR` - Naming Authority Pointer (`order`, `preference`, `flags`, `service`, `regexp`, `replacement`).
+- `CAA` - Certification Authority Authorization (`critical`, `issue` / `issuewild` / `iodef`, `value`).
+- `ANY` - Best-effort merged set of all record types (A, AAAA, MX, TXT, NS, CNAME, SOA, CAA). Same shape as `resolve_all`, but `ANY` is also valid as a value of `type` in the underlying API.
+
+Common parameters:
+- `host` - Hostname to query (required for `lookup` and `resolve_all`).
+- `ip` - IPv4 / IPv6 address for `reverse` (required for that action).
+- `type` - Record type for `lookup` (default `A`).
+- `servers` - Optional array of resolver IPs; if provided the query uses a one-shot Resolver (won't affect global config). Order matters; first responsive wins.
+- `timeout_ms` - Per-query timeout in ms (default 5000, max 60000). For `resolve_all`, this is per-record-type.
+- `tries` - Resolver retry count (default 4).
+
+Output:
+- Plain-text summary suitable for terminal display.
+- `metadata.records` is the parsed result (always an array except SOA which is a single object). For `resolve_all` / `ANY`, `metadata.by_type` is `{ [type]: records | { error } }`.
+- `metadata.elapsed_ms` is the total wall-clock time spent.

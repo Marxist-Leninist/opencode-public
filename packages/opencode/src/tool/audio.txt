@@ -1,0 +1,24 @@
+Audio file metadata tool - header-only parser for MP3, WAV (PCM/IEEE), FLAC, OGG (Vorbis/Opus), M4A/MP4 audio. No transcoding, no decoding, no embedded artwork retrieval - just structural info.
+
+Use when answering "what is this audio file?", "how long is it?", "what bit rate?", "is it stereo?" without invoking ffmpeg or external tools.
+
+Parameters:
+- `action`:
+  - `info` - Parse the file header and report format, sample rate, channels, bit depth, duration, bit rate, and (for compressed formats) codec details. Default action.
+- `filePath` (required) - Audio file path. Absolute or project-relative. Read permission asked.
+- `format` - `text` (default, terminal-friendly key=value) or `json`.
+
+Detection:
+- MP3 - Skips ID3v2 tag if present, then reads first MPEG audio frame header. Reports MPEG version, layer, bit rate, sample rate, channel mode (stereo / joint stereo / dual / mono). For VBR streams, scans the Xing/Info/VBRI header for total frame count, otherwise estimates duration from file size and average bit rate.
+- WAV - RIFF/WAVE chunks: `fmt ` + `data` (looks past unknown chunks like LIST/JUNK). Reports PCM / IEEE-float / extensible, sample rate, channels, bit depth.
+- FLAC - STREAMINFO metadata block (block type 0). Reports sample rate, bit depth, total samples -> duration.
+- OGG - Reads first Vorbis identification (`\x01vorbis`) or Opus head (`OpusHead`) packet. Final granule from last page -> duration.
+- MP4 / M4A - Walks the QuickTime/ISO box tree to find `moov/mvhd` (timescale + duration -> seconds) and `moov/trak/mdia/minf/stbl/stsd` for AAC/ALAC details (channels, sample rate). Skips `mdat`. Cap 64 MiB on full read.
+
+Output (text mode example):
+`format=mp3 mime=audio/mpeg sample_rate=44100 channels=2 bit_rate=192000 duration_s=215.04 bytes=5161812 codec=MPEG-1 Layer 3`
+
+Notes:
+- The detector is forgiving but not exhaustive. Files with multiple FLAC streams, fragmented MP4, or chained Ogg are reported as the first stream.
+- Bit rate for MP3 VBR is the average inferred from Xing TOC if available, else from file size / duration.
+- For Opus, the channel count and sample rate (always 48 kHz) come from the OpusHead packet; duration uses the final Ogg granule.

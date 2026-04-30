@@ -11,6 +11,10 @@ describe("SessionSearch", () => {
     )
   })
 
+  test("drops common stop words when scoring multi-word queries", () => {
+    expect(SessionSearch.terms("what are you doing")).toEqual(["doing"])
+  })
+
   test("builds a bounded snippet near the matching term", () => {
     const query = "ring model"
     const terms = SessionSearch.terms(query)
@@ -54,6 +58,18 @@ describe("SessionSearch", () => {
     expect(parsed).toEqual({
       answer: "No strong matches in the provided previews.",
       sessionIDs: [],
+    })
+  })
+
+  test("recovers exact semantic session IDs mentioned outside sessionIDs", () => {
+    const parsed = SessionSearch.parseSemanticResult(
+      '{"answer":"The useful chat is session b.","sessionIDs":[]} Mentioned IDs: b',
+      new Set(["a", "b"]),
+    )
+
+    expect(parsed).toEqual({
+      answer: "The useful chat is session b.",
+      sessionIDs: ["b"],
     })
   })
 })

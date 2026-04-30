@@ -1,0 +1,30 @@
+TCP port scanner - concurrent connect-scan against a host across one or more ports.
+
+Use when diagnosing local services, pairing with `net_check` and `dns`, or investigating which TCP ports a remote host accepts. This is a friendly diagnostics tool for hosts you control or have permission to scan; do not point it at third-party infrastructure.
+
+Parameters:
+- `host` (required) - Hostname or IP. Resolved via system DNS.
+- `ports` - Array of integer ports (1..65535).
+- `range` - Inclusive range string like `"1-1024"` or `"22,80,443,1000-1024"`. Combined with `ports` (deduped).
+- `preset` - Convenience set:
+  - `top10` - 22,80,443,3306,3389,5432,5900,8080,8443,27017
+  - `top100` - popular service ports.
+  - `web` - 80,443,8080,8443,3000,3001,4000,4200,5000,5173,7070,8000,8008,8081,8888,9000,9090
+  - `dev` - 3000,3001,4000,4200,5000,5173,5432,6379,8000,8080,9000,11434,27017
+- `timeout_ms` - Per-port connect timeout (default 1500, min 100, max 60000).
+- `concurrency` - Max simultaneous probes (default 64, min 1, max 1024).
+- `include_closed` - Include closed/refused ports in the textual output. `metadata.closed` always lists them.
+- `service_names` - Annotate well-known port -> service mappings (default true).
+
+Output:
+- Open ports, one per line: `<port>\t<service?>\t<latency_ms>ms` when service_names is on.
+- `metadata.open[]` - `{ port, service, latency_ms }` records, sorted by port.
+- `metadata.closed[]` - closed/refused ports, sorted.
+- `metadata.errored[]` - `{ port, error }` for ports that errored differently from "closed/timeout" (rare).
+- `metadata.total_ms` - wall-clock for the whole scan.
+- `metadata.scanned_count` - number of unique ports probed.
+
+Notes:
+- This is a TCP CONNECT scan - it completes a 3-way handshake and immediately drops the socket. Some firewalls log this. There is no SYN-only / stealth mode.
+- "Open" only proves a TCP listener accepted the handshake; it does not identify the service. The `service_names` mapping is heuristic.
+- Port 0 is rejected.

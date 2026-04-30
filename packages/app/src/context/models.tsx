@@ -17,7 +17,11 @@ type Store = {
 }
 
 const RECENT_LIMIT = 5
-export const DEFAULT_VISIBLE_MODELS = new Set(["openrouter:openrouter/free", "openrouter:openrouter/auto"])
+export const DEFAULT_VISIBLE_MODELS = new Set([
+  "openrouter:openrouter/free",
+  "openrouter:openrouter/auto",
+  "openrouter:inception/mercury-2",
+])
 
 function modelKey(model: ModelKey) {
   return `${model.providerID}:${model.modelID}`

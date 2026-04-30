@@ -1,0 +1,30 @@
+Key derivation function (KDF) tool - derive cryptographic keys from passwords or low-entropy secrets, plus PHC-style hash + verify for password storage.
+
+Use when:
+- You need to turn a user password into an encryption key (use `derive` then feed the output into the `crypto` tool's AES key field).
+- You need to hash a password for storage and later verification (use `hash` then `verify`).
+
+Two flavours of KDF are supported, both via Node's built-in `crypto`:
+- `pbkdf2` - RFC 2898, deterministic, configurable iterations and SHA digest. Lightweight, widely supported, easy to reason about. Default `iterations` = 100000, `digest` = `sha256`.
+- `scrypt` - RFC 7914, memory-hard, resistant to GPU/ASIC bruteforce. Configurable `N` (cost), `r` (block size), `p` (parallelism). Defaults: `N` = 16384, `r` = 8, `p` = 1, `maxmem` = 64 MiB.
+
+Actions:
+- `derive` - Derive a raw key. Returns `key_length` bytes encoded per `output_encoding`. Use this when you need the bytes to feed another primitive (AES, HMAC, etc.).
+- `hash` - Derive AND emit a self-describing PHC-like string `<algo>$<params>$<salt_b64>$<digest_b64>`. Stable for storage. Auto-generates a random 16-byte salt unless `salt` provided.
+- `verify` - Compare a `password` against a stored `hash`. Reads parameters and salt out of the hash string. Constant-time digest comparison.
+
+Output formats:
+- `derive` defaults to `hex` output. Override via `output_encoding`. (`hex` | `base64` | `base64url`).
+- `hash` always returns the PHC string verbatim.
+- `verify` returns `"true"` / `"false"` and `metadata.match`.
+
+PHC string formats produced:
+- `pbkdf2-sha256$i=100000,k=32$<salt>$<digest>`
+- `pbkdf2-sha512$i=210000,k=64$<salt>$<digest>`
+- `scrypt$N=16384,r=8,p=1,k=32$<salt>$<digest>`
+
+Notes:
+- `password` is read in `password_encoding` (default utf8).
+- `salt` is read in `salt_encoding` (default `auto` - interpret hex if all-hex, else utf8). For `hash`, omit to get a random 16-byte salt.
+- Memory cap `maxmem` for scrypt (default 64 MiB) is enforced by Node; raise it carefully - high `N*r*p*128` exceeds it quickly.
+- Derived bytes never go to logs. PHC strings are safe to store but should still be treated as secrets.
