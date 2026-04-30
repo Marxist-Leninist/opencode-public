@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { open as fsOpen } from "node:fs/promises"
 import { createConnection } from "node:net"
 import path from "path"
@@ -16,6 +17,10 @@ const MAX_STABLE_REQUIRED_MS = 600_000
 const DEFAULT_URL_TIMEOUT_MS = 10_000
 const DEFAULT_TEXT_TAIL_BYTES = 32_768
 const MAX_TEXT_TAIL_BYTES = 1_048_576
+const DEFAULT_COMMAND_TIMEOUT_MS = 5_000
+const MIN_COMMAND_TIMEOUT_MS = 200
+const MAX_COMMAND_TIMEOUT_MS = 60_000
+const COMMAND_OUTPUT_TAIL_BYTES = 4_096
 
 export const Parameters = Schema.Struct({
   seconds: Schema.Number.check(Schema.isInt())
@@ -97,11 +102,35 @@ export const Parameters = Schema.Struct({
   ).annotate({
     description: `Optional byte size of the file tail to test against until_text_pattern. Range 256-${MAX_TEXT_TAIL_BYTES}. Default ${DEFAULT_TEXT_TAIL_BYTES}.`,
   }),
+  until_command: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048))).annotate({
+    description:
+      "Optional shell command (run via the platform shell). On each poll the command is executed and its exit code compared against until_command_exit_code (default 0). The wait returns early as soon as the codes match. Use for 'gh pr checks', 'docker ps -q -f name=app', 'kubectl rollout status', etc. Each invocation is hard-killed at until_command_timeout_ms.",
+  }),
+  until_command_exit_code: Schema.optional(
+    Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)).check(Schema.isLessThanOrEqualTo(255)),
+  ).annotate({
+    description:
+      "Optional expected exit code for until_command. Defaults to 0 (success). Pass another code to wait until a non-zero exit; for example, 1 if you want to wait until 'pgrep foo' starts returning 'no match'.",
+  }),
+  until_command_timeout_ms: Schema.optional(
+    Schema.Number.check(Schema.isInt())
+      .check(Schema.isGreaterThanOrEqualTo(MIN_COMMAND_TIMEOUT_MS))
+      .check(Schema.isLessThanOrEqualTo(MAX_COMMAND_TIMEOUT_MS)),
+  ).annotate({
+    description: `Optional per-invocation timeout in ms for until_command. Default ${DEFAULT_COMMAND_TIMEOUT_MS}. Range ${MIN_COMMAND_TIMEOUT_MS}-${MAX_COMMAND_TIMEOUT_MS}. A timed-out probe is treated as a non-match and the next poll runs.`,
+  }),
 })
 
 type Params = Schema.Schema.Type<typeof Parameters>
 
-type WaitMode = "fixed" | "until_file" | "until_url" | "until_pid_exit" | "until_text" | "until_port"
+type WaitMode =
+  | "fixed"
+  | "until_file"
+  | "until_url"
+  | "until_pid_exit"
+  | "until_text"
+  | "until_port"
+  | "until_command"
 
 type Metadata = {
   mode: WaitMode
@@ -135,6 +164,12 @@ type Metadata = {
   text_tail_bytes?: number
   matched?: boolean
   match?: string
+  command?: string
+  command_exit_code?: number
+  command_expected_exit_code?: number
+  command_timeout_ms?: number
+  command_output_tail?: string
+  command_timed_out?: boolean
 }
 
 const abortable = <A, E, R>(
@@ -217,6 +252,76 @@ async function probeUrl(url: string, signal: AbortSignal, timeoutMs: number) {
     clearTimeout(timer)
     signal.removeEventListener("abort", onAbort)
   }
+}
+
+type CommandProbe = { exitCode: number | undefined; timedOut: boolean; output: string }
+
+function tailBuffer(current: Buffer, chunk: Buffer | string, maxBytes: number) {
+  const next = Buffer.concat([current, typeof chunk === "string" ? Buffer.from(chunk) : chunk])
+  if (next.length <= maxBytes) return next
+  return next.subarray(next.length - maxBytes)
+}
+
+async function probeCommand(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<CommandProbe> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (result: CommandProbe) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      try {
+        if (!child.killed) child.kill("SIGKILL")
+      } catch {
+        /* noop */
+      }
+      resolve(result)
+    }
+    let output = Buffer.alloc(0)
+    const collect = (chunk: Buffer | string) => {
+      output = tailBuffer(output, chunk, COMMAND_OUTPUT_TAIL_BYTES)
+    }
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(command, {
+        cwd,
+        shell: true,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    } catch (err: any) {
+      resolve({ exitCode: undefined, timedOut: false, output: String(err?.message ?? err) })
+      return
+    }
+    child.stdout?.on("data", collect)
+    child.stderr?.on("data", collect)
+    const onAbort = () => finish({ exitCode: undefined, timedOut: false, output: "aborted" })
+    signal.addEventListener("abort", onAbort, { once: true })
+    const timer = setTimeout(
+      () =>
+        finish({
+          exitCode: undefined,
+          timedOut: true,
+          output: output.toString("utf8").slice(-COMMAND_OUTPUT_TAIL_BYTES),
+        }),
+      timeoutMs,
+    )
+    child.once("error", (err: NodeJS.ErrnoException) => {
+      finish({ exitCode: undefined, timedOut: false, output: err?.message ?? String(err) })
+    })
+    child.once("close", (code) => {
+      finish({
+        exitCode: typeof code === "number" ? code : undefined,
+        timedOut: false,
+        output: output.toString("utf8").slice(-COMMAND_OUTPUT_TAIL_BYTES),
+      })
+    })
+  })
 }
 
 async function probeTcpPort(
@@ -400,6 +505,137 @@ export const WaitTool = Tool.define(
                   : aborted
                     ? `Wait cancelled after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
                     : `Timed out after ${elapsed.toFixed(1)}s waiting for /${regex.source}/${regex.flags} in ${target}. Reason: ${params.reason}`,
+            })
+          }
+
+          if (params.until_command) {
+            const command = params.until_command
+            const expectedExit = params.until_command_exit_code ?? 0
+            const cmdTimeout = params.until_command_timeout_ms ?? DEFAULT_COMMAND_TIMEOUT_MS
+            const commandLabel = command.length > 48 ? command.slice(0, 45) + "..." : command
+
+            yield* ctx.ask({
+              permission: "bash",
+              patterns: [command],
+              always: [command],
+              metadata: {
+                reason: params.reason,
+                source: "wait.until_command",
+                expected_exit_code: expectedExit,
+                timeout_ms: cmdTimeout,
+              },
+            })
+
+            yield* ctx.metadata({
+              title: `wait up to ${params.seconds}s for \`${commandLabel}\` exit ${expectedExit}`,
+              metadata: {
+                mode: "until_command",
+                command,
+                command_expected_exit_code: expectedExit,
+                command_timeout_ms: cmdTimeout,
+                seconds: params.seconds,
+                reason: params.reason,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+              },
+            })
+
+            let aborted = false
+            let cancelledByFile = false
+            let pollCount = 0
+            let lastExitCode: number | undefined
+            let lastOutput = ""
+            let lastTimedOut = false
+            let lastTitleUpdate = start
+            let ready = false
+
+            while (Date.now() < deadline) {
+              if (yield* checkCancel()) {
+                cancelledByFile = true
+                break
+              }
+              pollCount++
+
+              const probe = yield* Effect.promise(() => probeCommand(command, ins.directory, ctx.abort, cmdTimeout))
+              lastExitCode = probe.exitCode
+              lastOutput = probe.output
+              lastTimedOut = probe.timedOut
+
+              if (lastExitCode !== undefined && lastExitCode === expectedExit) {
+                ready = true
+                break
+              }
+
+              const now = Date.now()
+              if (now - lastTitleUpdate >= 1000 && now < deadline) {
+                lastTitleUpdate = now
+                const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+                const exitLabel = lastTimedOut ? "TO" : (lastExitCode !== undefined ? String(lastExitCode) : "?")
+                yield* ctx.metadata({
+                  title: `\`${commandLabel}\` exit ${exitLabel} (${left}s left)`,
+                  metadata: {
+                    mode: "until_command",
+                    command,
+                    command_expected_exit_code: expectedExit,
+                    command_exit_code: lastExitCode,
+                    command_timeout_ms: cmdTimeout,
+                    command_timed_out: lastTimedOut || undefined,
+                    seconds: params.seconds,
+                    reason: params.reason,
+                    elapsed_seconds: (now - start) / 1000,
+                    remaining_seconds: left,
+                    polls: pollCount,
+                    poll_interval_ms: pollIntervalMs,
+                    cancel_if_file: cancelTarget,
+                  },
+                })
+              }
+
+              const remaining = deadline - Date.now()
+              if (remaining <= 0) break
+              const tick = yield* abortable(sleepMs(Math.min(pollIntervalMs, remaining)), ctx.abort)
+              if (tick === "__aborted__") {
+                aborted = true
+                break
+              }
+            }
+
+            const elapsed = (Date.now() - start) / 1000
+            const titleSuffix = ready
+              ? `\`${commandLabel}\` exit ${lastExitCode} ready`
+              : cancelledByFile
+                ? `wait cancelled by file after ${elapsed.toFixed(1)}s`
+                : aborted
+                  ? `wait cancelled after ${elapsed.toFixed(1)}s`
+                  : `wait timed out after ${elapsed.toFixed(1)}s`
+            return done({
+              title: titleSuffix,
+              metadata: {
+                mode: "until_command",
+                command,
+                command_expected_exit_code: expectedExit,
+                command_exit_code: lastExitCode,
+                command_timeout_ms: cmdTimeout,
+                command_timed_out: lastTimedOut || undefined,
+                command_output_tail: lastOutput ? lastOutput.slice(-512) : undefined,
+                seconds: params.seconds,
+                elapsed_seconds: elapsed,
+                polls: pollCount,
+                reason: params.reason,
+                ready,
+                timed_out: !ready && !aborted && !cancelledByFile,
+                aborted,
+                poll_interval_ms: pollIntervalMs,
+                cancel_if_file: cancelTarget,
+                cancelled_by_file: cancelledByFile,
+              },
+              output: ready
+                ? `Command \`${command}\` returned exit ${lastExitCode} after ${elapsed.toFixed(1)}s. Reason: ${params.reason}`
+                : cancelledByFile
+                  ? `Wait cancelled after ${elapsed.toFixed(1)}s because sentinel file exists: ${cancelTarget}. Last exit: ${lastExitCode ?? (lastTimedOut ? "TIMEOUT" : "no exit")}. Reason: ${params.reason}`
+                  : aborted
+                    ? `Wait cancelled after ${elapsed.toFixed(1)}s. Last exit: ${lastExitCode ?? (lastTimedOut ? "TIMEOUT" : "no exit")}. Reason: ${params.reason}`
+                    : `Timed out after ${elapsed.toFixed(1)}s polling \`${command}\`. Last exit: ${lastExitCode ?? (lastTimedOut ? "TIMEOUT" : "no exit")} (expected ${expectedExit}). Reason: ${params.reason}`,
             })
           }
 

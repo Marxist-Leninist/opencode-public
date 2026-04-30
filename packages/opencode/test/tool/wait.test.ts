@@ -27,6 +27,10 @@ const baseCtx: Tool.Context = {
   ask: () => Effect.void,
 }
 
+const shellArg = (value: string) => JSON.stringify(value)
+const bunEval = (script: string, args: string[] = []) =>
+  [shellArg(process.execPath), "-e", shellArg(script), ...args.map(shellArg)].join(" ")
+
 describe("tool.wait", () => {
   it.live("waits in the same tool execution", () =>
     provideTmpdirInstance(() =>
@@ -336,6 +340,146 @@ describe("tool.wait", () => {
         expect(result.metadata.port_open).toBe(true)
         expect(result.metadata.port).toBe(server.port)
         expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(2)
+      }),
+    ),
+  )
+
+  it.live("returns early when until_command exits with the expected code", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 5,
+            reason: "wait for command success",
+            until_command: process.platform === "win32" ? "cmd /c exit 0" : "true",
+            poll_interval_ms: 200,
+            until_command_timeout_ms: 5000,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_command")
+        expect(result.metadata.ready).toBe(true)
+        expect(result.metadata.command_exit_code).toBe(0)
+        expect(result.metadata.elapsed_seconds ?? 999).toBeLessThan(2)
+      }),
+    ),
+  )
+
+  it.live("matches a non-zero expected exit code", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 5,
+            reason: "wait for command failure",
+            until_command: process.platform === "win32" ? "cmd /c exit 7" : "exit 7",
+            until_command_exit_code: 7,
+            poll_interval_ms: 200,
+            until_command_timeout_ms: 5000,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_command")
+        expect(result.metadata.ready).toBe(true)
+        expect(result.metadata.command_exit_code).toBe(7)
+        expect(result.metadata.command_expected_exit_code).toBe(7)
+      }),
+    ),
+  )
+
+  it.live("times out when until_command never matches the expected exit code", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 1,
+            reason: "expect mismatched exit",
+            until_command: process.platform === "win32" ? "cmd /c exit 1" : "false",
+            until_command_exit_code: 0,
+            poll_interval_ms: 200,
+            until_command_timeout_ms: 5000,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_command")
+        expect(result.metadata.ready).toBeFalsy()
+        expect(result.metadata.timed_out).toBe(true)
+        expect(result.metadata.command_exit_code).toBe(1)
+      }),
+    ),
+  )
+
+  it.live("asks bash permission before running until_command", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const marker = nodePath.join(dir, "marker.txt")
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const calls: Array<Parameters<Tool.Context["ask"]>[0]> = []
+        const exit = yield* Effect.exit(
+          tool.execute(
+            {
+              seconds: 5,
+              reason: "permission gate command wait",
+              until_command: bunEval("require('fs').writeFileSync(process.argv[1], 'ran')", [marker]),
+              poll_interval_ms: 200,
+              until_command_timeout_ms: 5000,
+            },
+            {
+              ...baseCtx,
+              ask: (input) =>
+                Effect.sync(() => {
+                  calls.push(input)
+                  throw new Error("permission probe")
+                }),
+            },
+          ),
+        )
+
+        const markerExists = yield* Effect.promise(() =>
+          fs.access(marker).then(
+            () => true,
+            () => false,
+          ),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(markerExists).toBe(false)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.permission).toBe("bash")
+        expect(calls[0]!.metadata.source).toBe("wait.until_command")
+      }),
+    ),
+  )
+
+  it.live("keeps the command output tail in metadata", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const toolInfo = yield* WaitTool
+        const tool = yield* toolInfo.init()
+        const result = yield* tool.execute(
+          {
+            seconds: 5,
+            reason: "capture command tail",
+            until_command: bunEval("process.stdout.write('head\\n' + 'x'.repeat(6000) + '\\ntail-marker\\n')"),
+            poll_interval_ms: 200,
+            until_command_timeout_ms: 5000,
+          },
+          baseCtx,
+        )
+
+        expect(result.metadata.mode).toBe("until_command")
+        expect(result.metadata.ready).toBe(true)
+        expect(result.metadata.command_output_tail).toContain("tail-marker")
       }),
     ),
   )

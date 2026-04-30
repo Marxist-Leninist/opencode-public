@@ -2015,6 +2015,7 @@ function Wait(props: ToolProps<typeof WaitTool>) {
   const pattern = createMemo(() => props.input.until_text_pattern ?? props.metadata.pattern)
   const url = createMemo(() => props.input.until_url ?? props.metadata.url)
   const pid = createMemo(() => props.input.until_pid_exit ?? props.metadata.pid)
+  const command = createMemo(() => props.input.until_command ?? props.metadata.command)
   const label = createMemo(() => (typeof seconds() === "number" ? `${seconds()}s` : "delay"))
 
   return (
@@ -2027,6 +2028,7 @@ function Wait(props: ToolProps<typeof WaitTool>) {
       </Show>
       <Show when={url()}> [{String(url())}]</Show>
       <Show when={pid()}> [pid {String(pid())}]</Show>
+      <Show when={command()}> [`{String(command()).slice(0, 32)}`]</Show>
     </InlineTool>
   )
 }

@@ -14,6 +14,8 @@ Modes (mutually exclusive after `seconds`/`reason`):
 
 6. **Wait until TCP port open** - pass `seconds`, `reason`, and `until_port` (1-65535), optionally `until_port_host` (default `127.0.0.1`). The tool tries to open a TCP connection on each poll and returns as soon as the connection is accepted. Use this when you only need to know that a process started listening (dev server, database, electron debug port) without paying for an HTTP roundtrip or worrying about the server's exact response shape.
 
+7. **Wait until shell command exits** - pass `seconds`, `reason`, and `until_command` (a shell command line). The command is gated by the normal `bash` permission before polling starts. On each poll the command is executed and its exit code is compared against `until_command_exit_code` (default 0). Returns early as soon as the codes match. Use this for `gh pr checks --required`, `docker ps -q -f name=app`, `kubectl rollout status deploy/app`, or any check whose exit code is the signal. Each invocation is hard-killed at `until_command_timeout_ms` (default 5000) so a hung probe cannot wedge the wait. Pass `until_command_exit_code: 1` etc. to wait for a non-zero result.
+
 Always provide a short `reason` string. It is shown to the user in the UI so they can see why the agent is paused.
 
 Optional controls (work in every mode):
@@ -52,5 +54,8 @@ Example uses:
 - Test runner: `{ "seconds": 300, "reason": "tests done", "until_text": "test.log", "until_text_pattern": "(\\\\d+ pass|\\\\d+ fail)", "text_pattern_flags": "im" }`
 - Dev server TCP port: `{ "seconds": 60, "reason": "wait for vite to listen", "until_port": 5173, "poll_interval_ms": 250 }`
 - Postgres warmup: `{ "seconds": 30, "reason": "wait for db", "until_port": 5432, "until_port_host": "127.0.0.1" }`
+- PR checks green: `{ "seconds": 1800, "reason": "wait for CI", "until_command": "gh pr checks 123 --required", "poll_interval_ms": 30000 }`
+- Docker container up: `{ "seconds": 120, "reason": "wait for app container", "until_command": "docker ps -q -f name=app -f status=running | grep -q .", "poll_interval_ms": 2000 }`
+- Wait until process disappears: `{ "seconds": 60, "reason": "wait for installer to finish", "until_command": "tasklist /FI \"IMAGENAME eq setup.exe\" | find /I \"setup.exe\"", "until_command_exit_code": 1, "poll_interval_ms": 2000 }`
 
 Do NOT use this tool to artificially slow down responses, pad time, or wait on something you could check directly with `read`/`glob`/`grep`. Use it only when there is a genuine asynchronous event you need to wait on.
