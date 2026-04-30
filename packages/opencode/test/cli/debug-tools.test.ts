@@ -33,11 +33,13 @@ describe("debug tools smoke helpers", () => {
     expect(new Set(SG_NATIVE_TOOL_IDS).size).toBe(SG_NATIVE_TOOL_IDS.length)
   })
 
-  test("smoke list covers wait/hash and the new country tool", () => {
+  test("smoke list covers flagship and query helper SG tools", () => {
     // These are flagship SG additions; guard against regressing the smoke
     // list when adding new tools.
     expect(SG_NATIVE_TOOL_IDS).toContain("wait")
     expect(SG_NATIVE_TOOL_IDS).toContain("hash")
     expect(SG_NATIVE_TOOL_IDS).toContain("country")
+    expect(SG_NATIVE_TOOL_IDS).toContain("jsonpath")
+    expect(SG_NATIVE_TOOL_IDS).toContain("xpath")
   })
 })

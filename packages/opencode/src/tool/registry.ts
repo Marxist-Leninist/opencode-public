@@ -89,6 +89,8 @@ import { BignumTool } from "./bignum"
 import { SlugTool } from "./slug"
 import { PkceTool } from "./pkce"
 import { CountryTool } from "./country"
+import { JsonpathTool } from "./jsonpath"
+import { XpathTool } from "./xpath"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -269,6 +271,8 @@ export const layer: Layer.Layer<
     const slugtool = yield* SlugTool
     const pkcetool = yield* PkceTool
     const countrytool = yield* CountryTool
+    const jsonpathtool = yield* JsonpathTool
+    const xpathtool = yield* XpathTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -435,6 +439,8 @@ export const layer: Layer.Layer<
           slug: Tool.init(slugtool),
           pkce: Tool.init(pkcetool),
           country: Tool.init(countrytool),
+          jsonpath: Tool.init(jsonpathtool),
+          xpath: Tool.init(xpathtool),
         })
 
         return {
@@ -532,6 +538,8 @@ export const layer: Layer.Layer<
             tool.slug,
             tool.pkce,
             tool.country,
+            tool.jsonpath,
+            tool.xpath,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

@@ -1,0 +1,40 @@
+Query JSON with JSONPath expressions. Useful for extracting fields from API responses, config files, or any structured JSON without loading the whole document into the chat. More powerful than the `json` tool's simple dot/bracket paths because it supports wildcards, recursive descendants, slices, and unions.
+
+INPUT (one of)
+- data: inline JSON string (object, array, or scalar). Use for ad-hoc queries.
+- filePath: path to a .json file on disk. Absolute or relative to the project. Up to 64 MiB.
+
+PATH (required)
+JSONPath expression. Examples:
+- $                          root
+- $.foo.bar                  child key
+- $['foo']['bar']            child key (bracket form)
+- $.items[0]                 first item of array
+- $.items[-1]                last item (negative index)
+- $.items[*].name            wildcard: name of every item
+- $..price                   recursive descendant: every "price" anywhere in the tree
+- $.items[0:5]               slice (start:end), end exclusive
+- $.items[0:10:2]            slice with step
+- $.items[*]['name','price'] union of keys
+- $['users','admins']        union of two top-level keys
+
+MODES
+- values (default): return matched values as a JSON array
+- paths: return matched paths in canonical bracket-notation
+- first: return only the first match (or null if none)
+- count: return only the number of matches
+
+OPTIONS
+- limit: cap on returned results (1-1000, default 100). Hard cap protects you from queries that match thousands of nodes.
+- pretty: pretty-print the output JSON (default true).
+
+UNSUPPORTED (use bash + jq for these)
+- filter expressions like [?(@.price > 10)]
+- function calls like length() or .min()
+- script expressions like [(@.length-1)]
+
+NOTES
+- Numeric indices in JSONPath are zero-based. Negative indices count from the end.
+- Slices follow Python semantics: start inclusive, end exclusive, step >= 1.
+- Recursive descendant (..) walks every nested object and array.
+- Output is truncated to a safe size; use limit and a more specific path if you hit the cap.

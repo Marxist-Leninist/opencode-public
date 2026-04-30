@@ -102,6 +102,8 @@ const AVAILABLE_TOOLS = [
   "slug",
   "pkce",
   "country",
+  "jsonpath",
+  "xpath",
 ]
 
 const AgentCreateCommand = cmd({

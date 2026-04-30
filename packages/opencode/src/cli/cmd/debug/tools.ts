@@ -38,6 +38,7 @@ export const SG_NATIVE_TOOL_IDS = [
   "image",
   "ini",
   "json",
+  "jsonpath",
   "jwt",
   "kdf",
   "latlon",
@@ -81,6 +82,7 @@ export const SG_NATIVE_TOOL_IDS = [
   "which",
   "whois",
   "xml",
+  "xpath",
   "yaml",
 ] as const
 

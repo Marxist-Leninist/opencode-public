@@ -20,6 +20,8 @@ const RECENT_LIMIT = 5
 export const DEFAULT_VISIBLE_MODELS = new Set([
   "openrouter:openrouter/free",
   "openrouter:openrouter/auto",
+  "openrouter:openrouter/auto@preset/latency",
+  "openrouter:openrouter/free@preset/latency",
   "openrouter:inception/mercury-2",
 ])
 

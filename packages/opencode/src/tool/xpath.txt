@@ -1,0 +1,49 @@
+Query XML with XPath-like expressions. Pairs with the `jsonpath` tool: this one is for XML, that one is for JSON.
+
+Useful for pulling specific data out of RSS/Atom feeds, SOAP envelopes, JUnit reports, plist files, AndroidManifest.xml, XLIFF, MusicXML, OPML, SVG, sitemap.xml, etc., without parsing the whole document yourself.
+
+INPUT (one of)
+- data: inline XML string. Use for ad-hoc queries.
+- filePath: path to a .xml file. Absolute or relative to the project. Up to 64 MiB.
+
+PATH (required)
+A subset of XPath 1.0:
+- /a/b           absolute child path: root must be `a`, then child `b`
+- a/b            relative child path (no leading slash; root assumed)
+- //b            descendant-or-self: every `<b>` anywhere in the tree
+- *              wildcard element
+- @attr          attribute selector (must be the last step)
+- text()         text content of an element (must be the last step)
+- name()         the element's local name (must be the last step)
+- [N]            1-based positional predicate, e.g. `/a/b[1]`
+- [last()]       last element predicate
+- [@attr]        attribute exists predicate
+- [@attr='val']  attribute equals predicate (single or double quotes)
+
+Examples:
+- /rss/channel/title                    title of an RSS feed
+- //item/link                           every link in any item
+- //book[@category='fiction']/title    titles of fiction books
+- //testcase[1]/@name                  name attribute of the first testcase
+- //*[@id='hero']                      element with id="hero"
+
+MODES
+- values  (default) - JSON array of matched values. Element matches stringify to text content; attribute matches stringify to the attribute value; text() returns the text.
+- xml     - matched nodes as XML fragments (one per match).
+- paths   - canonical XPath path to each match.
+- first   - only the first match (or null if none).
+- count   - number of matches.
+
+OPTIONS
+- limit: cap on returned results (1-1000, default 100).
+- pretty: pretty-print xml output (default false). values output is always compact JSON.
+
+UNSUPPORTED (use a real XPath engine if you need these)
+- Filter expressions with comparisons other than `=` (no <, >, !=, contains, starts-with).
+- Functions other than text(), name(), last() (no string-length, normalize-space, count, etc.).
+- Axes other than child/descendant (no ancestor::, following::, etc.).
+- Namespace-aware queries; namespace prefixes are matched literally as part of the element name.
+
+NOTES
+- Position predicates are 1-based per the XPath spec.
+- Output is truncated to a safe size; use limit and a more specific path if you hit the cap.
