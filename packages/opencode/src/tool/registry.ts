@@ -81,6 +81,8 @@ import { ChunkTool } from "./chunk"
 import { StatsTool } from "./stats"
 import { TreeTool } from "./tree"
 import { UlidTool } from "./ulid"
+import { PowerShellTool } from "./powershell"
+import { ICalTool } from "./ical"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -253,6 +255,8 @@ export const layer: Layer.Layer<
     const statstool = yield* StatsTool
     const treetool = yield* TreeTool
     const ulidtool = yield* UlidTool
+    const powershelltool = yield* PowerShellTool
+    const icaltool = yield* ICalTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -411,6 +415,8 @@ export const layer: Layer.Layer<
           stats: Tool.init(statstool),
           tree: Tool.init(treetool),
           ulid: Tool.init(ulidtool),
+          powershell: Tool.init(powershelltool),
+          ical: Tool.init(icaltool),
         })
 
         return {
@@ -500,6 +506,8 @@ export const layer: Layer.Layer<
             tool.stats,
             tool.tree,
             tool.ulid,
+            tool.powershell,
+            tool.ical,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

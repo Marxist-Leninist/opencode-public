@@ -1,0 +1,34 @@
+Parse and build iCalendar (RFC 5545) data — what .ics files use.
+
+ACTIONS
+- parse: decode an .ics blob (text or file) into a structured JSON of events.
+- build: encode a list of event objects into RFC 5545 ICS text (CRLF, line-folded).
+- info: quick header summary (prodid, calname, method, version, event count) without dumping every event.
+
+PARSE / INFO
+- Pass `text` (raw ICS string) or `file` (path to .ics). Exactly one of them.
+- Property params, line folding, escape sequences (\\n, \\,, \\;, \\\\) are all handled.
+- ATTENDEE/ORGANIZER values are split into `email` and `cn`. RSVP, ROLE, PARTSTAT lifted into the event.
+- DTSTART/DTEND keep their RFC 5545 form (`20260430T093000Z` or `20260430` for VALUE=DATE).
+- Output for action='parse' is JSON with prodid, calname, method, version, events[].
+
+BUILD
+- Pass `events: [...]`. At minimum each event needs `summary` and `dtstart`.
+- Date inputs accepted as ISO 8601 (`2026-04-30T09:00:00Z`), RFC 5545 (`20260430T090000Z`), or `YYYY-MM-DD` for all-day (becomes VALUE=DATE).
+- Either `dtend` or `duration_minutes`. `duration_minutes` becomes `DURATION:PT<N>M`.
+- `uid` is auto-generated from summary+dtstart when omitted, so re-running build with the same inputs gives the same UID — useful for idempotent calendar updates.
+- Optional: `description`, `location`, `url`, `status`, `rrule`, `categories`, `organizer`, `attendees`.
+- Optional calendar-level: `prodid`, `calname`, `method`. Use `method='REQUEST'` for an invitation, `'CANCEL'` for a cancellation.
+- Output is a CRLF-terminated, 75-octet-folded VCALENDAR ready to write to disk or attach to an email as text/calendar.
+
+EXAMPLES
+- Build a one-hour meeting invite:
+    action=build
+    events=[{ summary: "1:1 with Sam", dtstart: "2026-05-01T15:00:00Z", duration_minutes: 60, attendees: [{ email: "sam@example.com", role: "REQ-PARTICIPANT", rsvp: true }] }]
+    method="REQUEST"
+
+- Read someone else's invite:
+    action=parse, file="invite.ics"
+
+- Quick sanity-check on a feed:
+    action=info, text="<paste of ICS>"

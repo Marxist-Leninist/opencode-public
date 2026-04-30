@@ -94,6 +94,8 @@ const AVAILABLE_TOOLS = [
   "stats",
   "tree",
   "ulid",
+  "powershell",
+  "ical",
 ]
 
 const AgentCreateCommand = cmd({

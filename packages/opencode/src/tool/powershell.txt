@@ -1,0 +1,47 @@
+Run a PowerShell script in a non-interactive session and return its output.
+
+WHEN TO USE
+- Windows-specific tasks: registry, services, Get-Process, COM objects, WMI, Out-Printer.
+- Cross-platform PowerShell pipelines (pwsh) where Verb-Noun cmdlets are clearer than POSIX equivalents.
+- Anything where the bash tool would otherwise wrap `powershell -Command "..."`.
+
+WHEN NOT TO USE
+- Generic POSIX shell commands — use the bash tool.
+- Interactive prompts — this tool runs `-NonInteractive`. Read-Host, Get-Credential, Out-GridView, $Host.UI.PromptForChoice, and any pause-style cmdlet will hang and ultimately time out.
+
+EXECUTABLE SELECTION
+- `prefer="auto"` (default): tries `pwsh` (PowerShell 7+) first, then `powershell.exe` on Windows.
+- `prefer="pwsh"`: PowerShell 7+. Cross-platform.
+- `prefer="powershell"`: Windows PowerShell 5.1. Windows-only.
+- The chosen executable is reported in metadata.executable.
+
+SCRIPT SHAPE
+- The `command` is sent through stdin as one script — multi-line is fine.
+- The script runs with this prelude already applied:
+    $ErrorActionPreference = 'Stop'
+    $ProgressPreference    = 'SilentlyContinue'
+    $ConfirmPreference     = 'None'
+    UTF-8 console encoding
+- Because of `Stop`, any non-terminating cmdlet error becomes terminating. Wrap in `try { ... } catch { ... }` if you need to keep going.
+- Pipeline chain operators `&&` / `||` are NOT available in Windows PowerShell 5.1. Either target pwsh, or use `if ($?) { ... }` for conditional chaining.
+- `2>&1` on a native exe in Windows PowerShell 5.1 wraps each stderr line in an ErrorRecord. stderr is captured separately by this tool — don't redirect.
+
+OUTPUT
+- stdout and stderr are returned in clearly labelled blocks and capped per-stream by `max_output_bytes` (default 1 MB each). When a cap fires, the kept portion is the head and the marker says so.
+- Exit code, signal, timeout flag, and duration are in metadata.
+- By default any non-zero exit code is treated as failure. Set `ignore_exit_code: true` for cmdlets where a non-zero exit is informational.
+
+TIMEOUT
+- Default 60s, max 600s (10 min). On timeout the process is killed and `timed_out: true` is set in metadata.
+
+EXAMPLES
+- Quick registry probe:
+    Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' | Select-Object ProductName, DisplayVersion, CurrentBuild
+
+- List running services filtered by name:
+    Get-Service | Where-Object Name -like 'W3*' | Select-Object Name, Status, StartType
+
+- Cross-platform: list every .ts file modified in the last day under packages/opencode/src/tool:
+    Get-ChildItem packages/opencode/src/tool -Recurse -Filter '*.ts' |
+      Where-Object LastWriteTime -gt (Get-Date).AddDays(-1) |
+      Select-Object FullName, LastWriteTime
