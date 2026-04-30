@@ -1,10 +1,16 @@
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Tag } from "@opencode-ai/ui/tag"
-import { batch, createMemo, For, onCleanup, onMount, Show } from "solid-js"
+import { batch, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { useGlobalSDK } from "@/context/global-sdk"
+import { useLocal } from "@/context/local"
+import { useModels } from "@/context/models"
+import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import * as THREE from "three"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
 
 type TransportKind = "simulator" | "hardware"
 type ControllerKind = "agi-vision"
@@ -39,6 +45,17 @@ type VisionFrame = {
   offsetY: number
   depth: number
   confidence: number
+}
+
+type RobotAction = {
+  baseDelta?: number
+  shoulderDelta?: number
+  elbowDelta?: number
+  wristDelta?: number
+  gripper?: "open" | "closed"
+  reasoning?: string
+  modality?: "vision" | "text"
+  supportsImage?: boolean
 }
 
 const DEFAULT_POSE: RobotPose = { x: 0, y: 42, z: 28, yaw: 0, grip: 42 }
@@ -177,6 +194,24 @@ function setupRobotScene(
 
   const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 240)
   camera.position.set(0, 31, 66)
+
+  const controls = new OrbitControls(camera, renderer.domElement)
+  controls.enableDamping = true
+  controls.dampingFactor = 0.08
+  controls.minDistance = 18
+  controls.maxDistance = 180
+  controls.maxPolarAngle = Math.PI * 0.495
+  controls.target.set(0, 24, 0)
+  controls.update()
+  let userOrbiting = false
+  controls.addEventListener("start", () => {
+    userOrbiting = true
+  })
+  const resetOrbit = () => {
+    userOrbiting = false
+    controls.reset()
+  }
+  renderer.domElement.addEventListener("dblclick", resetOrbit)
 
   const ambient = new THREE.HemisphereLight(0xf4fbff, 0x27342c, 1.8)
   scene.add(ambient)
@@ -366,8 +401,11 @@ function setupRobotScene(
     targetHalo.rotation.y += loop === "running" ? 0.04 : 0.012
     targetLight.position.copy(targetPosition).add(new THREE.Vector3(0, 14, 12))
 
-    camera.position.set(pose.x * 0.035, 31 + pose.z * 0.035, 66)
-    camera.lookAt(new THREE.Vector3(pose.x * 0.18, 24, -54))
+    if (!userOrbiting) {
+      controls.target.set(pose.x * 0.18, 24, -54)
+      camera.position.set(pose.x * 0.035, 31 + pose.z * 0.035, 66)
+    }
+    controls.update()
     renderer.render(scene, camera)
     animation = requestAnimationFrame(render)
   }
@@ -376,6 +414,8 @@ function setupRobotScene(
   return () => {
     cancelAnimationFrame(animation)
     observer.disconnect()
+    renderer.domElement.removeEventListener("dblclick", resetOrbit)
+    controls.dispose()
     renderer.dispose()
     environment.dispose()
     pmrem.dispose()
@@ -391,8 +431,62 @@ function setupRobotScene(
   }
 }
 
+const ROBOT_MODEL_STORAGE = "opencode.robotLab.model"
+
 export default function Robotics() {
   let viewportRef: HTMLDivElement | undefined
+  const models = useModels()
+  const globalSDK = useGlobalSDK()
+  const local = useLocal()
+  const platform = usePlatform()
+  const server = useServer()
+
+  const visibleRobotModels = createMemo(() =>
+    models
+      .list()
+      .filter((m) => models.visible({ providerID: m.provider.id, modelID: m.id }))
+      .sort((a, b) => a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name)),
+  )
+
+  const currentLocalModelValue = () => {
+    const current = local.model.current()
+    return current ? `${current.provider.id}/${current.id}` : ""
+  }
+
+  const initialModel = (() => {
+    try {
+      return localStorage.getItem(ROBOT_MODEL_STORAGE) ?? currentLocalModelValue()
+    } catch {
+      return currentLocalModelValue()
+    }
+  })()
+  const [selectedModel, setSelectedModelRaw] = createSignal(initialModel)
+  const setSelectedModel = (next: string) => {
+    try {
+      if (next) {
+        localStorage.setItem(ROBOT_MODEL_STORAGE, next)
+        const [providerID, ...rest] = next.split("/")
+        const modelID = rest.join("/")
+        if (providerID && modelID) models.recent.push({ providerID, modelID })
+      } else {
+        localStorage.removeItem(ROBOT_MODEL_STORAGE)
+      }
+    } catch {}
+    setSelectedModelRaw(next)
+  }
+  const modelBody = () => {
+    const v = selectedModel()
+    if (!v) return undefined
+    const [providerID, ...rest] = v.split("/")
+    const modelID = rest.join("/")
+    if (!providerID || !modelID) return undefined
+    return { providerID, modelID }
+  }
+  const modelLabel = createMemo(() => {
+    const m = visibleRobotModels().find((x) => `${x.provider.id}/${x.id}` === selectedModel())
+    return m ? `${m.provider.name} / ${m.name}` : "heuristic (no model)"
+  })
+
   const [store, setStore] = createStore({
     transport: "simulator" as TransportKind,
     controller: "agi-vision" as ControllerKind,
@@ -402,8 +496,29 @@ export default function Robotics() {
     target: { ...DEFAULT_TARGET },
     image: observeImage(DEFAULT_POSE, DEFAULT_TARGET),
     command: ZERO_COMMAND,
+    busy: false,
+    modality: "local" as "local" | "vision" | "text",
+    supportsImage: false,
     logs: ["AGI vision policy simulator ready. First-person 3D image feed is synthetic."],
   })
+
+  const headers = (json = false) => {
+    const h: Record<string, string> = { accept: "application/json" }
+    if (json) h["content-type"] = "application/json"
+    const http = server.current?.http
+    if (http?.password) h.authorization = `Basic ${btoa(`${http.username ?? "opencode"}:${http.password}`)}`
+    return h
+  }
+
+  const captureFrame = () => {
+    const canvas = viewportRef?.querySelector('canvas[data-robot-scene="true"]') as HTMLCanvasElement | null
+    if (!canvas) return undefined
+    try {
+      return canvas.toDataURL("image/png")
+    } catch {
+      return undefined
+    }
+  }
 
   const pushLog = (line: string) => {
     const stamped = `${new Date().toLocaleTimeString([], { hour12: false })}  ${line}`
@@ -421,14 +536,92 @@ export default function Robotics() {
     })
   }
 
-  const stepLoop = (label = "AGI vision loop") => {
+  const sceneDescription = (frame: VisionFrame) => {
+    const dx = store.target.x - store.pose.x
+    const dy = store.target.y - store.pose.y
+    const dz = store.target.z - store.pose.z
+    return [
+      `target_visible=${frame.confidence > 0.4}`,
+      `target_screen_offset_x_pct=${frame.offsetX.toFixed(1)} (negative=left, positive=right)`,
+      `target_screen_offset_y_pct=${frame.offsetY.toFixed(1)} (negative=above, positive=below)`,
+      `distance_gripper_to_target=${frame.depth.toFixed(2)}`,
+      `pose: x=${store.pose.x.toFixed(1)}, y=${store.pose.y.toFixed(1)}, z=${store.pose.z.toFixed(1)}, yaw=${store.pose.yaw.toFixed(1)}, grip=${store.pose.grip.toFixed(1)}`,
+      `target_xyz=${store.target.x.toFixed(1)},${store.target.y.toFixed(1)},${store.target.z.toFixed(1)}`,
+      `vector_gripper_to_target: dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, dz=${dz.toFixed(1)}`,
+      `close_gripper_when_distance_under_5=${frame.depth < 5}`,
+    ].join("\n")
+  }
+
+  const stepLoop = async (label = "AGI vision loop") => {
+    if (store.busy || store.loop === "stopped") return
     const frame = observeImage(store.pose, store.target)
-    const command = imageServoCommand(frame, store.pose, store.target)
-    setCommandedPose(command)
-    if (store.frame % 6 === 0) {
-      pushLog(
-        `${label}: ${command.label} from image frame, depth ${frame.depth.toFixed(1)}, offset ${frame.offsetX.toFixed(1)}px`,
-      )
+    const m = modelBody()
+    setStore("busy", true)
+    if (!m) {
+      try {
+        const command = imageServoCommand(frame, store.pose, store.target)
+        batch(() => {
+          setStore("modality", "local")
+          setStore("supportsImage", false)
+        })
+        setCommandedPose(command)
+        if (store.frame % 6 === 0) {
+          pushLog(`${label}: ${command.label} (heuristic) depth=${frame.depth.toFixed(1)}`)
+        }
+      } finally {
+        setStore("busy", false)
+      }
+      return
+    }
+    try {
+      const fetcher = platform.fetch ?? fetch
+      const res = await fetcher(`${globalSDK.url}/robot/step`, {
+        method: "POST",
+        headers: headers(true),
+        body: JSON.stringify({
+          goal: "Reach the target and grasp it.",
+          fpv: captureFrame(),
+          sceneDescription: sceneDescription(frame),
+          joints: {
+            base: store.pose.yaw,
+            shoulder: store.pose.z * 0.5,
+            elbow: -store.pose.y * 0.5,
+            wrist: store.pose.x * 0.25,
+            gripper: store.pose.grip > 50 ? "closed" : "open",
+          },
+          targetHeld: targetDistance() < 5 && store.pose.grip > 75,
+          model: m,
+        }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const action = (await res.json()) as RobotAction
+      const command: RobotCommand = {
+        x: clamp((action.wristDelta ?? 0) * 0.35, -2.8, 2.8),
+        y: clamp(-(action.elbowDelta ?? 0) * 0.3, -2.8, 2.8),
+        z: clamp((action.shoulderDelta ?? 0) * 0.25, -2.2, 2.2),
+        yaw: clamp((action.baseDelta ?? 0) * 0.12, -1.4, 1.4),
+        grip: action.gripper === "closed" ? 2.4 : action.gripper === "open" ? -0.8 : 0,
+        label: action.modality ? `ai/${action.modality}` : "ai policy",
+      }
+      batch(() => {
+        setStore("modality", action.modality ?? "text")
+        setStore("supportsImage", Boolean(action.supportsImage))
+      })
+      setCommandedPose(command)
+      pushLog(`${label} [${action.modality ?? "ai"}]: ${action.reasoning ?? "bounded action returned"}`)
+    } catch (cause) {
+      const command = imageServoCommand(frame, store.pose, store.target)
+      batch(() => {
+        setStore("modality", "local")
+        setStore("supportsImage", false)
+      })
+      setCommandedPose(command)
+      pushLog(`${label} [fallback]: ${cause instanceof Error ? cause.message : String(cause)} -> heuristic`)
+    } finally {
+      setStore("busy", false)
     }
   }
 
@@ -460,8 +653,8 @@ export default function Robotics() {
   onMount(() => {
     const loopTimer = setInterval(() => {
       if (store.loop !== "running") return
-      stepLoop()
-    }, 140)
+      void stepLoop()
+    }, 900)
 
     const disposeScene = viewportRef
       ? setupRobotScene(viewportRef, () => ({ pose: store.pose, target: store.target, loop: store.loop }))
@@ -502,6 +695,9 @@ export default function Robotics() {
               <Tag>3D</Tag>
               <Tag>{store.transport}</Tag>
               <Tag>{store.loop}</Tag>
+              <Show when={store.busy}>
+                <Tag>model busy</Tag>
+              </Show>
             </div>
             <p class="text-12-regular text-text-weak">
               Simulates an image-capable AGI controller reading the first-person camera frame and emitting bounded arm
@@ -513,6 +709,7 @@ export default function Robotics() {
               size="small"
               variant={store.loop === "running" ? "secondary" : "primary"}
               icon={store.loop === "running" ? "stop" : "arrow-up"}
+              disabled={store.busy && store.loop !== "running"}
               onClick={() => {
                 const next = store.loop === "running" ? "idle" : "running"
                 setStore("loop", next)
@@ -521,7 +718,13 @@ export default function Robotics() {
             >
               {store.loop === "running" ? "Pause loop" : "Start AGI loop"}
             </Button>
-            <Button size="small" variant="secondary" icon="enter" onClick={() => stepLoop("single step")}>
+            <Button
+              size="small"
+              variant="secondary"
+              icon="enter"
+              disabled={store.busy || store.loop === "stopped"}
+              onClick={() => void stepLoop("single step")}
+            >
               Step
             </Button>
             <Button size="small" variant="secondary" icon="reset" onClick={home}>
@@ -570,7 +773,7 @@ export default function Robotics() {
                 <Tag>webgl</Tag>
               </div>
               <div class="absolute bottom-3 left-3 right-3 z-10 flex items-center justify-between gap-2 text-11-regular text-text-weak">
-                <span>first-person RGB frame to AGI controller</span>
+                <span>drag to orbit, wheel to zoom, double-click reset</span>
                 <span>{reticleAligned() ? "target centered" : "servo correcting"}</span>
               </div>
             </div>
@@ -645,9 +848,29 @@ export default function Robotics() {
                 <h2 class="text-14-medium text-text-strong">AGI control loop</h2>
                 <Icon name="window-cursor" size="small" class="text-icon-weak" />
               </div>
+              <div class="mb-3 flex flex-col gap-1.5">
+                <label class="text-11-regular text-text-weak">Controller model</label>
+                <select
+                  value={selectedModel()}
+                  onChange={(e) => setSelectedModel(e.currentTarget.value)}
+                  disabled={store.busy}
+                  class="h-8 rounded-md border border-border-base bg-surface-base px-2 text-12-regular text-text-base outline-none"
+                >
+                  <option value="">Heuristic (no model)</option>
+                  <For each={visibleRobotModels()}>
+                    {(m) => (
+                      <option value={`${m.provider.id}/${m.id}`}>
+                        {m.provider.name} / {m.name}
+                      </option>
+                    )}
+                  </For>
+                </select>
+                <span class="text-11-regular text-text-weak">{modelLabel()}</span>
+              </div>
               <div class="flex flex-col gap-2 text-12-regular text-text-base">
-                <LoopRow label="Controller" value="image-capable AGI policy" />
-                <LoopRow label="Image input" value="RGB frame + reticle + depth" />
+                <LoopRow label="Controller" value={store.busy ? "waiting for model" : "image-capable AGI policy"} />
+                <LoopRow label="Model path" value={store.modality === "local" ? "local fallback" : `ai/${store.modality}`} />
+                <LoopRow label="Image input" value={store.supportsImage ? "canvas PNG + text observation" : "text observation"} />
                 <LoopRow label="Action schema" value="dx, dy, dz, yaw, grip" />
                 <LoopRow
                   label="Image offset"

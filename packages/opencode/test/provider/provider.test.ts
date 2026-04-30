@@ -1890,6 +1890,43 @@ test("openrouter router models are always available", () => {
   expect(auto.api.url).toBe("https://openrouter.ai/api/v1")
 })
 
+test("openrouter preset models route base id with extra body preset", () => {
+  const provider = Provider.fromModelsDevProvider({
+    id: "openrouter",
+    name: "OpenRouter",
+    env: ["OPENROUTER_API_KEY"],
+    npm: "@openrouter/ai-sdk-provider",
+    api: "https://openrouter.ai/api/v1",
+    models: {
+      "google/gemini-2.5-flash@preset/latency": {
+        id: "google/gemini-2.5-flash@preset/latency",
+        name: "Gemini 2.5 Flash Latency",
+        family: "gemini",
+        release_date: "2025-06-17",
+        attachment: true,
+        reasoning: true,
+        temperature: true,
+        tool_call: true,
+        cost: {
+          input: 0,
+          output: 0,
+        },
+        limit: {
+          context: 1_000_000,
+          input: 1_000_000,
+          output: 65_536,
+        },
+      },
+    },
+  })
+
+  const model = provider.models["google/gemini-2.5-flash@preset/latency"]
+  expect(model).toBeDefined()
+  expect(model.id as string).toBe("google/gemini-2.5-flash@preset/latency")
+  expect(model.api.id).toBe("google/gemini-2.5-flash")
+  expect(model.options).toEqual({ extraBody: { preset: "latency" } })
+})
+
 test("mode cost preserves over-200k pricing from base model", () => {
   const provider = {
     id: "openai",

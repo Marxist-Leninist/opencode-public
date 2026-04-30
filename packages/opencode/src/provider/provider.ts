@@ -86,7 +86,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
 }
 
 type BundledSDK = {
-  languageModel(modelId: string): LanguageModelV3
+  languageModel(modelId: string, options?: Record<string, unknown>): LanguageModelV3
 }
 
 const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>> = {
@@ -1030,20 +1030,31 @@ const OPENROUTER_ROUTER_MODELS = {
   },
 } satisfies Record<string, ModelsDev.Model>
 
+function openrouterPresetModel(modelID: string) {
+  const marker = "@preset/"
+  const index = modelID.indexOf(marker)
+  if (index < 0) return
+  const base = modelID.slice(0, index)
+  const preset = modelID.slice(index + marker.length)
+  if (!base || !preset) return
+  return { base, preset }
+}
+
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
+  const openrouterPreset = provider.id === ProviderID.openrouter ? openrouterPresetModel(model.id) : undefined
   const base: Model = {
     id: ModelID.make(model.id),
     providerID: ProviderID.make(provider.id),
     name: model.name,
     family: model.family,
     api: {
-      id: model.id,
+      id: openrouterPreset?.base ?? model.id,
       url: model.provider?.api ?? provider.api ?? "",
       npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
     },
     status: model.status ?? "active",
     headers: {},
-    options: {},
+    options: openrouterPreset ? { extraBody: { preset: openrouterPreset.preset } } : {},
     cost: cost(model.cost),
     limit: {
       context: model.limit.context,
@@ -1631,7 +1642,9 @@ const layer: Layer.Layer<
                 ...provider.options,
                 ...model.options,
               })
-            : sdk.languageModel(model.api.id)
+            : Object.keys(model.options).length > 0
+              ? sdk.languageModel(model.api.id, model.options)
+              : sdk.languageModel(model.api.id)
           s.models.set(key, language)
           return language
         } catch (e) {

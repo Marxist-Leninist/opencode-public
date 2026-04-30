@@ -340,7 +340,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
                   if (target) openResult(target)
                 }
               }}
-              placeholder="Search chat text, tool output, titles... (↑/↓ navigate, Ctrl+Enter open)"
+              placeholder="Search chat text, tool output, titles... (Up/Down navigate, Ctrl+Enter open)"
               class="w-full h-10 pl-10 pr-3 rounded-md border border-border-base bg-surface-base text-14-regular text-text-strong outline-none focus:border-border-strong"
             />
           </div>
