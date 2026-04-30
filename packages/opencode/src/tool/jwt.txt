@@ -1,0 +1,43 @@
+JWT tool - decode, verify, and sign JSON Web Tokens (JWS, RFC 7515 + RFC 7519). Pure Node `crypto`, no external libraries. Supports HMAC, RSA, ECDSA, and EdDSA signatures.
+
+Use when you need to inspect a token (`decode`), check it's authentic (`verify`), or mint a test token (`sign`) without spawning external CLIs. Decode and verify are read-only transforms; sign produces a token from a payload + key.
+
+Parameters:
+- `action` (required): `decode` | `verify` | `sign`.
+- `token` (decode/verify): The JWT string `header.payload.signature`.
+- `algorithm` (sign/verify): `HS256` (default for HMAC), `HS384`, `HS512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`, `EdDSA`, or `none` (signing-disabled, only useful for parser tests).
+- `secret` (sign/verify, HS*): HMAC secret as a string in `secret_encoding`.
+- `secret_encoding`: `utf8` (default) | `hex` | `base64` | `base64url`.
+- `public_key` (verify, asymmetric): PEM-encoded public key.
+- `private_key` (sign, asymmetric): PEM-encoded private key (PKCS#8 or PKCS#1).
+- `key_passphrase` (sign): Optional passphrase for an encrypted private key.
+- `payload` (sign): JSON object to encode as the JWT claim set. Pass as a JSON-serialisable object.
+- `header` (sign): Optional header overrides. `alg` is set automatically; `typ` defaults to `JWT`. You can add `kid`, custom claims, etc.
+- `expires_in_s` (sign): If set, the tool inserts `exp = iat + expires_in_s` into the payload.
+- `not_before_s` (sign): If set, inserts `nbf = iat + not_before_s` (negative values backdate).
+- `issuer` / `audience` / `subject` (sign): Convenience claims `iss`, `aud`, `sub`. Override anything in `payload`.
+- `clock_tolerance_s` (verify): Seconds of leeway for `exp` / `nbf` checks. Default 0.
+- `verify_claims` (verify): Optional `{ iss?, aud?, sub? }` to require exact matches.
+
+Behaviour:
+- `decode`: parses but does NOT verify. Returns `{ header, payload, signature_b64url, alg, kid?, claims_exp_iso?, claims_iat_iso?, claims_nbf_iso? }`. Useful for "what's in this token?" questions before fetching keys.
+- `verify`: cryptographically validates the signature with the supplied secret/public_key, then enforces `exp`/`nbf` (with `clock_tolerance_s`) and any `verify_claims`. Returns `{ valid: true, ... }` or throws on failure.
+- `sign`: builds `base64url(header) + '.' + base64url(payload) + '.' + base64url(signature)`. Always sets `alg`, `typ=JWT` (unless overridden), `iat=now()` (unless `payload.iat` set).
+
+Algorithm key types:
+- HS256/HS384/HS512: HMAC. Pass `secret`.
+- RS*/PS*: RSA. Pass PEM `public_key` (verify) / `private_key` (sign). PS uses PSS padding.
+- ES256/ES384/ES512: ECDSA on P-256/P-384/P-521. JWT signatures are R||S (raw), not DER - the tool handles the conversion both directions.
+- EdDSA: Ed25519 / Ed448, depending on the key.
+- `none`: pass-through with empty signature; verify fails by default unless `algorithm: "none"` is explicitly passed.
+
+Examples:
+- Decode unknown token: `{ "action": "decode", "token": "eyJ..." }`.
+- Verify HS256: `{ "action": "verify", "token": "...", "algorithm": "HS256", "secret": "shhh" }`.
+- Verify RS256: `{ "action": "verify", "token": "...", "algorithm": "RS256", "public_key": "-----BEGIN PUBLIC KEY----- ..." }`.
+- Sign 1-hour HS256: `{ "action": "sign", "algorithm": "HS256", "secret": "shhh", "payload": { "user": 42 }, "expires_in_s": 3600 }`.
+
+Notes:
+- Pure transform: no filesystem or network IO. No permission prompt.
+- Timing-safe comparisons via `crypto.timingSafeEqual` for HMAC verify.
+- `secret_encoding` matters for HMAC: many real systems use base64url-encoded random bytes, not the literal UTF-8 string of a passphrase.

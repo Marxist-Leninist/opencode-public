@@ -1,0 +1,28 @@
+TLS certificate inspection tool - connect over TLS and report on the server certificate, full chain, negotiated protocol/cipher, expiry, and SAN/hostname coverage. Pure Node `tls` module, no curl/openssl shellouts.
+
+Use when net_check (HTTP HEAD/GET) or dns are not enough - e.g. checking how long until cert expires, what cipher suite a server picks, what SANs a wildcard cert covers, or verifying a self-signed pinned cert.
+
+Parameters:
+- `action` (required):
+  - `inspect` - Connect, finish handshake, return the leaf certificate, negotiated TLS protocol/cipher, ALPN result, and a hostname-coverage check. Default and most useful action.
+  - `chain` - Like `inspect` but also includes the full peer certificate chain (issuer chain).
+  - `expiry` - Just the leaf cert dates plus `days_until_expiry`. Useful for cron-style monitoring.
+- `host` (required) - Hostname or IP to connect to.
+- `port` - TCP port. Default 443.
+- `servername` - SNI value sent in the ClientHello. Defaults to `host` (sent only when `host` is a hostname, omitted when `host` is a literal IP). Override to inspect a virtual host without DNS.
+- `timeout_ms` - Per-connection timeout. Default 8000, max 60000.
+- `min_version` / `max_version` - Restrict the TLS version range. Values: `TLSv1`, `TLSv1.1`, `TLSv1.2`, `TLSv1.3`. Default lets Node pick (typically 1.2/1.3).
+- `alpn_protocols` - Optional ALPN list to advertise, e.g. `["h2","http/1.1"]`. Reports the server's selection.
+- `reject_unauthorized` - Default `true`. When `false`, the connection still completes for self-signed/expired certs and the result reports the verification error. Use this to inspect broken servers without aborting.
+- `ca` - Optional PEM string with one or more trust anchors to override the default CA bundle (still respects `reject_unauthorized`).
+
+Returns common fields:
+- `host`, `port`, `servername`, `protocol` (e.g. `TLSv1.3`), `cipher` (`{ name, version, standardName }`), `alpn_protocol`, `session_reused`, `authorized`, `authorization_error`, `elapsed_ms`.
+- `certificate`: subject (CN/O/OU), issuer, valid_from / valid_to (ISO), `days_until_expiry`, `expired`, `not_yet_valid`, `serial_number`, `fingerprint_sha256` (colon-uppercased hex), `subject_alt_names` (DNS:/IP:/URI: prefixed), `key` (`{ type: "RSA"|"EC"|"OKP", bits, curve? }`), `signature_algorithm`.
+- `hostname_match` (inspect/chain): `{ matched: bool, matched_san?, reason? }` checked against `servername` (or `host`). Wildcards are honored per RFC 6125.
+- `chain` (chain action): Array<certificate> ordered leaf -> root, each with subject/issuer/valid_from/valid_to/fingerprint_sha256.
+
+Notes:
+- IP literal hostnames suppress the SNI extension (RFC 6066 Section 3) unless you pass `servername` explicitly.
+- The hostname check independently validates wildcards; it does not rely on Node's authorization (which is also reported via `authorized`).
+- Read-only / network-side-effect-free: the tool does the TLS handshake, captures cert details, then closes. No HTTP request is sent.

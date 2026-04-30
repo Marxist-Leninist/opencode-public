@@ -79,6 +79,8 @@ const AVAILABLE_TOOLS = [
   "luhn",
   "port_scan",
   "audio",
+  "tls",
+  "jwt",
 ]
 
 const AgentCreateCommand = cmd({

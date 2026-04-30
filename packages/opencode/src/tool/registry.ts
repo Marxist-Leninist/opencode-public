@@ -66,6 +66,8 @@ import { KdfTool } from "./kdf"
 import { LuhnTool } from "./luhn"
 import { PortScanTool } from "./port_scan"
 import { AudioTool } from "./audio"
+import { TlsTool } from "./tls"
+import { JwtTool } from "./jwt"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -223,6 +225,8 @@ export const layer: Layer.Layer<
     const luhntool = yield* LuhnTool
     const portscantool = yield* PortScanTool
     const audiotool = yield* AudioTool
+    const tlstool = yield* TlsTool
+    const jwttool = yield* JwtTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -366,6 +370,8 @@ export const layer: Layer.Layer<
           luhn: Tool.init(luhntool),
           port_scan: Tool.init(portscantool),
           audio: Tool.init(audiotool),
+          tls: Tool.init(tlstool),
+          jwt: Tool.init(jwttool),
         })
 
         return {
@@ -440,6 +446,8 @@ export const layer: Layer.Layer<
             tool.luhn,
             tool.port_scan,
             tool.audio,
+            tool.tls,
+            tool.jwt,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
