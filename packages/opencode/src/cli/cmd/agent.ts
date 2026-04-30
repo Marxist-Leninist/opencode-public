@@ -89,6 +89,11 @@ const AVAILABLE_TOOLS = [
   "unit",
   "primes",
   "lorem",
+  "mask",
+  "chunk",
+  "stats",
+  "tree",
+  "ulid",
 ]
 
 const AgentCreateCommand = cmd({

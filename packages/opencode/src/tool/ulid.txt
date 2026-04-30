@@ -1,0 +1,25 @@
+Generate, parse, and validate ULIDs (Universally Unique Lexicographically Sortable Identifiers).
+
+A ULID is a 128-bit identifier encoded as a 26-char Crockford-base32 string. Unlike a UUIDv4, ULIDs are sortable by generation time because the first 48 bits are a unix-ms timestamp. Useful when you need a primary key that is both unique and chronologically orderable - for example, ordering rows in a database without an extra `created_at` column, building idempotency keys that compare lexicographically, or merging events from multiple writers without a coordinator.
+
+Pure local computation, no I/O, deterministic when `seed` is provided.
+
+Actions:
+- `generate` - return one or more ULIDs. Optional `count` (default 1, max 1000), `seed` (deterministic randomness), `time_ms` (override the embedded timestamp; default Date.now()), `monotonic` (default true: when generating multiple at the same millisecond, increment the random part instead of generating a fresh one, preserving lexicographic order within the batch).
+- `parse` - decode a ULID string into its timestamp_ms (and ISO date), the 16-byte raw value (hex), and the 80-bit random part (hex/base32).
+- `validate` - return true/false for whether a string is a valid ULID (26 chars, all from Crockford alphabet, timestamp <= 281474976710655).
+- `from_uuid` - convert a 16-byte UUID/uuid-shaped string to a ULID-encoded string (same 128 bits, different encoding). Useful when migrating an existing UUIDv7-style id.
+- `to_uuid` - convert a ULID back to canonical UUID form (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+
+Common parameters:
+- `value` - input ULID/UUID for parse/validate/from_uuid/to_uuid.
+- `count` - integer >=1 for generate. Default 1.
+- `seed` - optional integer seed for deterministic random bytes (uses mulberry32). When unset, uses crypto.randomBytes.
+- `time_ms` - optional integer >=0 to override the embedded timestamp for generate. Useful for tests / backfills.
+- `monotonic` - boolean; default true. Within a single tool call, ULIDs generated at the same millisecond are guaranteed to be lexicographically increasing.
+
+Crockford base32 alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (no I, L, O, U). All output is uppercase. Parsing accepts lowercase, but I/L are decoded as 1, O as 0 (per Crockford rules).
+
+Notes:
+- ULID timestamp range is unix-ms in [0, 2^48 - 1]. That covers years up to ~10889 AD, so overflow is not a practical concern.
+- `monotonic` only applies within a single tool invocation. Two separate calls at the same ms will likely produce ULIDs that are still ordered by their random part, but the spec only guarantees monotonicity inside a generator instance.

@@ -1,0 +1,36 @@
+Render a directory listing as an ASCII tree. Pure local read of the filesystem.
+
+Use when you want a quick at-a-glance map of a directory's structure without building a custom find/ls invocation. Cheaper than `bash` for the common case, gives consistent output across platforms, and won't accidentally cd into another directory.
+
+Parameters:
+- `path` - directory to walk. Required. Relative paths are resolved against the current working directory.
+- `max_depth` - integer recursion cap (1 = list only direct children). Default 4. Range 1..16.
+- `max_entries` - cap on the total number of files+directories returned. Default 500. Range 1..10000. When the cap is hit the output ends with `... (truncated, N more entries)`.
+- `dirs_only` - if true, omit regular files. Default false.
+- `show_hidden` - if true, include entries starting with `.`. Default false.
+- `pattern` - optional case-insensitive substring match applied to each entry's basename. Useful as a quick filter ("only show *.ts files" -> use `.ts`).
+- `exclude` - JSON array of substrings; any entry whose basename or path contains one of them is skipped. Default omits common noise (`node_modules`, `.git`, `dist`, `build`, `.next`, `target`, `__pycache__`, `.venv`, `venv`, `.cache`, `coverage`).
+- `sort` - `name` (default), `size_desc`, or `mtime_desc`.
+- `show_size` - if true, append `(<bytes>)` next to each file. Default false.
+
+Output format follows the classic Unix `tree` style:
+    src
+    ├── index.ts
+    ├── lib
+    │   ├── a.ts
+    │   └── b.ts
+    └── README.md
+
+Metadata returned alongside the rendered tree:
+- `dirs` - count of directories visited.
+- `files` - count of regular files emitted.
+- `truncated` - true if `max_entries` was hit.
+- `root` - absolute path that was walked.
+- `bytes_total` - sum of sizes of emitted files (only computed when `show_size` is true).
+
+Notes:
+- Symlinks are listed but not followed (cycle protection).
+- Permission errors on a subdirectory are reported inline as `<dirname> (error: <code>)` and walking continues.
+- Excludes are matched against basename and the full path, case-sensitive.
+- Pattern is matched against basename only and is case-insensitive.
+- For very large trees, prefer `glob` + `read` over passing a giant `max_entries` cap.
