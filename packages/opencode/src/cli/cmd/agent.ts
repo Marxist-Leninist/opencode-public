@@ -81,6 +81,7 @@ const AVAILABLE_TOOLS = [
   "audio",
   "tls",
   "jwt",
+  "otp",
 ]
 
 const AgentCreateCommand = cmd({

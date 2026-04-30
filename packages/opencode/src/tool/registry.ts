@@ -68,6 +68,7 @@ import { PortScanTool } from "./port_scan"
 import { AudioTool } from "./audio"
 import { TlsTool } from "./tls"
 import { JwtTool } from "./jwt"
+import { OtpTool } from "./otp"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -227,6 +228,7 @@ export const layer: Layer.Layer<
     const audiotool = yield* AudioTool
     const tlstool = yield* TlsTool
     const jwttool = yield* JwtTool
+    const otptool = yield* OtpTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -372,6 +374,7 @@ export const layer: Layer.Layer<
           audio: Tool.init(audiotool),
           tls: Tool.init(tlstool),
           jwt: Tool.init(jwttool),
+          otp: Tool.init(otptool),
         })
 
         return {
@@ -448,6 +451,7 @@ export const layer: Layer.Layer<
             tool.audio,
             tool.tls,
             tool.jwt,
+            tool.otp,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

@@ -1,0 +1,37 @@
+OTP tool - generate and verify HOTP (RFC 4226) and TOTP (RFC 6238) one-time passwords. Also parses `otpauth://` URIs (Google Authenticator format) and renders provisioning URIs for QR codes.
+
+Use when scripting MFA tests, verifying that an authenticator-app secret is correct, or building login automation. Pure Node `crypto` HMAC, no external libs.
+
+Parameters:
+- `action` (required):
+  - `totp` - Compute the current TOTP code for `secret` at the current time (or `at_unix_s`).
+  - `hotp` - Compute the HOTP code for `secret` at counter `counter` (required).
+  - `verify_totp` - Check that `code` is valid for `secret` within `window` steps (default 1 step before/after = 30s typical leeway).
+  - `verify_hotp` - Check that `code` matches HOTP at counter in `[counter, counter + look_ahead]`. Returns the matching counter on success.
+  - `parse_uri` - Parse an `otpauth://totp/...?secret=...` or `otpauth://hotp/...` URI.
+  - `make_uri` - Build a provisioning URI from `secret`, `issuer`, `account`, etc.
+- `type` - URI type for `make_uri`: `totp` (default) or `hotp`.
+- `secret` - Base32-encoded secret (RFC 4648). Whitespace and dashes are stripped. Lower/upper case both accepted.
+- `algorithm` - `SHA1` (default, what RFC 6238 mandates and what every authenticator app actually does), `SHA256`, `SHA512`.
+- `digits` - Code length 6-10. Default 6.
+- `period_s` - TOTP step in seconds. Default 30.
+- `at_unix_s` - Compute TOTP at this unix time instead of `Date.now()`. Useful for tests / replay.
+- `counter` - HOTP counter (required for hotp/verify_hotp and `make_uri` with `type=hotp`).
+- `look_ahead` - Number of counters to scan past `counter` for verify_hotp. Default 10.
+- `window` - Number of TOTP steps before AND after the current one to accept (verify_totp). Default 1 (so a 30s step gives 90s total leeway). Set 0 for strict.
+- `code` - The OTP to verify (verify_totp / verify_hotp).
+- `uri` - The `otpauth://` URI (parse_uri).
+- `issuer` - Provider name (make_uri).
+- `account` - Account name / email (make_uri).
+
+Returns:
+- `totp` / `hotp`: `{ code, counter, algorithm, digits, period_s?, secret_bits? }`.
+- `verify_*`: `{ valid: bool, matched_counter?, drift_steps? }`. `drift_steps` is signed (-window..window) for TOTP.
+- `parse_uri`: full structured form including `type`, `secret`, `issuer`, `account`, `algorithm`, `digits`, `period_s`, `counter` if HOTP.
+- `make_uri`: the encoded `otpauth://` URI.
+
+Notes:
+- Secret is base32 (RFC 4648, no padding required). Keys shorter than the HMAC block size are NOT padded; this matches the RFCs.
+- `verify_totp` uses `crypto.timingSafeEqual` per candidate to mitigate timing attacks.
+- `parse_uri` decodes percent-encoded labels and extracts the issuer from the path or the `issuer=` parameter (with `path` taking precedence per the Google Authenticator spec).
+- Pure transform: no filesystem or network IO.
