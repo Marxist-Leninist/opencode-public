@@ -1,0 +1,52 @@
+Geographic latitude/longitude math.
+
+Use when computing distance between two points, finding the bearing,
+projecting a destination from a start point + bearing + distance, deriving a
+geographic midpoint, or building a bounding box for a radius search.
+
+Pure-math, no network. All angles in degrees; coordinates accept either
+decimal-degree numbers or DMS strings (`51 deg 28' 38" N` / `51 28 38 N` /
+`51:28:38N`) and a few common shorthand forms (`51.477N`, `-0.001`).
+
+Actions:
+- `distance` - Distance between `from` and `to`. Default `algorithm`
+  `haversine` (great-circle on a sphere of mean Earth radius 6371 km).
+  `algorithm=vincenty` uses Vincenty's inverse formula on the WGS-84
+  ellipsoid for higher accuracy on long or near-antipodal segments.
+  `metadata.distance` is in `unit` (default `km`).
+- `bearing` - Forward (`kind=initial`, default) or final (`kind=final`)
+  bearing in degrees from `from` to `to`. 0=N, 90=E, 180=S, 270=W.
+- `midpoint` - Geographic midpoint of `from` and `to`.
+- `destination` - Project a destination from `from` along `bearing`
+  degrees by `distance` in `unit`.
+- `bbox` - Bounding box around `from` with radius `distance` in `unit`.
+  Returns `{ min: {lat,lon}, max: {lat,lon} }`. Latitude clamped to
+  [-90, 90]; longitude wraps across the antimeridian when needed (in that
+  case `metadata.bbox.crosses_antimeridian = true`).
+- `parse` - Parse a coordinate string into `{ lat, lon }` decimal degrees.
+- `format` - Format a coordinate as `decimal` (default) or `dms`.
+- `validate` - Whether `lat`/`lon` are valid (lat in [-90, 90], lon in
+  [-180, 180]).
+
+Common parameters:
+- `from`, `to` - Either `{ lat, lon }` or a string parsed by the same logic
+  as `parse`. Examples: `"51.5074, -0.1278"`, `"40.7128 N, 74.0060 W"`,
+  `"40deg42'46\"N 74deg00'21\"W"`.
+- `lat`, `lon` - Used by `parse`/`format`/`validate` (decimal degrees).
+- `bearing` - Degrees clockwise from north (for `destination`).
+- `distance` - Number in `unit` (for `destination` and `bbox`).
+- `unit` - One of `km` (default), `m`, `mi`, `nmi`.
+- `algorithm` - `haversine` (default) or `vincenty` (for `distance`).
+- `kind` - `initial` (default) or `final` (for `bearing`).
+- `format` - `decimal` (default) or `dms` (for `format`).
+- `precision` - Decimal places for outputs. Default 6 for decimal degrees,
+  3 for distances.
+
+Notes:
+- Vincenty fails to converge for nearly antipodal points; in that case the
+  tool reports `algorithm: "haversine_fallback"` in metadata.
+- Earth radius constants: spherical mean 6371000 m, WGS-84 a=6378137 m,
+  b~=6356752.314245 m, f=1/298.257223563.
+- Distances are great-circle / geodesic; not road or rhumb-line. For a
+  rhumb-line bearing you can use `bearing` with two points along the
+  rhumb, but the tool itself uses initial/final great-circle bearings.

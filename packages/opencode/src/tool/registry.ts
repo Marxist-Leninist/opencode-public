@@ -71,6 +71,8 @@ import { JwtTool } from "./jwt"
 import { OtpTool } from "./otp"
 import { HumanizeTool } from "./humanize"
 import { TabulateTool } from "./tabulate"
+import { FuzzyTool } from "./fuzzy"
+import { LatLonTool } from "./latlon"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -233,6 +235,8 @@ export const layer: Layer.Layer<
     const otptool = yield* OtpTool
     const humanizetool = yield* HumanizeTool
     const tabulatetool = yield* TabulateTool
+    const fuzzytool = yield* FuzzyTool
+    const latlontool = yield* LatLonTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -381,6 +385,8 @@ export const layer: Layer.Layer<
           otp: Tool.init(otptool),
           humanize: Tool.init(humanizetool),
           tabulate: Tool.init(tabulatetool),
+          fuzzy: Tool.init(fuzzytool),
+          latlon: Tool.init(latlontool),
         })
 
         return {
@@ -460,6 +466,8 @@ export const layer: Layer.Layer<
             tool.otp,
             tool.humanize,
             tool.tabulate,
+            tool.fuzzy,
+            tool.latlon,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

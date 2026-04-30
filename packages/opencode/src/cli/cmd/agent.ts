@@ -82,6 +82,10 @@ const AVAILABLE_TOOLS = [
   "tls",
   "jwt",
   "otp",
+  "humanize",
+  "tabulate",
+  "fuzzy",
+  "latlon",
 ]
 
 const AgentCreateCommand = cmd({

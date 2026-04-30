@@ -1,0 +1,49 @@
+Fuzzy string matching and edit-distance utilities.
+
+Use when comparing two strings, picking the closest match from a list of
+candidates (autocomplete, command suggestion, "did you mean...?"), or scoring
+similarity for ranking.
+
+All algorithms are pure-string and run in-process (no network).
+
+Actions:
+- `levenshtein` - Edit distance between `a` and `b` (insert/delete/substitute,
+  each cost 1). `metadata.distance` is the integer edit count.
+- `damerau` - Damerau-Levenshtein (Levenshtein + transposition of adjacent
+  chars as a single edit). `metadata.distance` integer.
+- `hamming` - Hamming distance between equal-length `a` and `b` (count of
+  differing positions). Errors if lengths differ.
+- `jaro` - Jaro similarity 0..1 for `a` and `b`. `metadata.score` float.
+- `jaro_winkler` - Jaro + Winkler prefix bonus (default `prefix_weight=0.1`,
+  capped at 4 leading common chars). `metadata.score` float.
+- `lcs` - Longest common subsequence. Returns the LCS string.
+  `metadata.length` is its length.
+- `similarity` - Normalized Levenshtein similarity:
+  `1 - distance / max(|a|, |b|)`. Returns 0..1 float.
+- `best_match` - Given `value` and `candidates[]`, score every candidate with
+  `algorithm` (defaults to `jaro_winkler`) and return the top `limit` matches
+  sorted descending. Output is human-readable; `metadata.matches[]` has
+  `{ value, score, distance? }`. Honors `min_score` to filter.
+
+Common parameters:
+- `a`, `b` - The two strings to compare (for binary ops).
+- `value` - The query string (for `best_match`).
+- `candidates` - Array of strings to compare against (for `best_match`).
+- `algorithm` - One of `levenshtein`/`damerau`/`hamming`/`jaro`/
+  `jaro_winkler`/`similarity`/`lcs`. Default `jaro_winkler` for `best_match`.
+- `case_sensitive` - Default false (lowercases inputs first).
+- `trim` - Strip leading/trailing whitespace before comparing. Default false.
+- `prefix_weight` - Jaro-Winkler prefix scaling factor (default 0.1, max 0.25).
+- `limit` - For `best_match`, max number of results returned (default 5,
+  capped at 1000).
+- `min_score` - For `best_match`, drop matches below this score (default 0).
+
+Notes:
+- Jaro / Jaro-Winkler scale: 1.0 is identical, 0.0 is no match.
+- Levenshtein scale: 0 is identical, larger means more different.
+- For ranking similar strings, `jaro_winkler` is usually best (rewards
+  matching prefixes - ideal for command names, identifiers, names).
+- For typo correction, `damerau` distance handles transpositions ("teh" vs
+  "the") more naturally than plain `levenshtein`.
+- Empty strings: distance to non-empty equals length; similarity to empty
+  is 1.0 if both empty, 0.0 otherwise.
