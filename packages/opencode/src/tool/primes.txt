@@ -1,0 +1,28 @@
+Prime number and integer-arithmetic toolkit. Pure BigInt math, no deps.
+
+Use when you need primality testing, factorization, prime generation, or classical multi-value GCD/LCM/totient/divisor calculations.
+
+Actions:
+- `is_prime` - boolean primality test on `value`. Uses deterministic Miller-Rabin with witnesses good for any value below 2^81 (about 2.4e24), which covers any 64-bit unsigned integer and well beyond. Returns `"true"` / `"false"` and metadata.composite_factor when n is composite and a small witness factor is found.
+- `next_prime` - smallest prime > `value`.
+- `prev_prime` - largest prime < `value` (errors if `value <= 2`).
+- `factorize` - full prime factorization of `value`. Returns space-separated `p^k` terms; metadata.factors lists `{ prime, exponent }`. Falls back to Pollard's rho for factors > 10^9.
+- `n_primes` - first N primes (cap N=10000). Uses a sieve.
+- `nth_prime` - the N-th prime (1-indexed; nth_prime(1) = 2). Cap N=100000.
+- `primes_between` - every prime in the inclusive integer range [`a`, `b`]. Cap b-a <= 10^7 and result count <= 100000.
+- `gcd` - greatest common divisor of every entry in `values[]` (or two-arg `value`/`other`).
+- `lcm` - least common multiple. Returns BigInt-safe result as a decimal string in `output` and BigInt-stringified in metadata.
+- `divisors` - every positive divisor of `value`, sorted ascending. Cap value <= 10^14.
+- `totient` - Euler's totient phi(n) using the prime factorization shortcut.
+- `coprime` - boolean: are all entries in `values[]` pairwise coprime?
+
+Common parameters:
+- `value` - required for is_prime/next_prime/prev_prime/factorize/nth_prime/divisors/totient. Accepts a non-negative integer up to 2^53-1 directly, or a numeric string for larger values.
+- `n` - required for `n_primes` and `nth_prime`.
+- `a`, `b` - required for `primes_between`.
+- `values` - required for `gcd`/`lcm`/`coprime`. Accepts numbers or numeric strings; minimum 2 entries.
+- `other` - convenience second arg for binary `gcd`/`lcm` when only two values are needed.
+
+Notes:
+- All numeric outputs that can exceed Number.MAX_SAFE_INTEGER are returned as decimal strings.
+- For numbers above 2^53, pass them as strings. The tool parses them as BigInts.

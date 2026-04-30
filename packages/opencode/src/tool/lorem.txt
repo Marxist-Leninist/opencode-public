@@ -1,0 +1,23 @@
+Generate placeholder ("lorem ipsum") text. Pure, deterministic when given a seed.
+
+Use when filling in mock copy, generating fixtures, sizing layouts, or stress-testing text rendering.
+
+Actions:
+- `words` - generate exactly N words. Cap N=2000.
+- `sentences` - generate N sentences (each 4-12 words by default). Cap N=500.
+- `paragraphs` - generate N paragraphs (each 3-7 sentences). Cap N=100.
+- `bytes` - generate as many words as needed to reach approximately N bytes (UTF-8). Cap N=200000.
+- `slug` - generate a hyphenated lorem-style slug of N words. Cap N=12. Default 4.
+- `title` - generate a Title-Cased phrase of N words. Cap N=12. Default 5.
+
+Common parameters:
+- `n` - count argument; meaning depends on action (see above).
+- `seed` - optional integer; when provided, output is deterministic and reproducible. Without it, a fresh `Math.random()` stream is used.
+- `start_with_lorem` - for sentences/paragraphs, force the first sentence to begin with the canonical "Lorem ipsum dolor sit amet, consectetur adipiscing elit." Default true.
+- `min_words_per_sentence`, `max_words_per_sentence` - clamp sentence length. Default 4 and 12.
+- `min_sentences_per_paragraph`, `max_sentences_per_paragraph` - clamp paragraph length. Default 3 and 7.
+- `paragraph_sep` - separator between paragraphs. Default `"\n\n"`.
+
+Notes:
+- The vocabulary is a curated 250-word lorem-ipsum word list derived from the standard Cicero passage. No prepositions or numbers leak in unless they appear in the source word list.
+- Output never includes characters outside the ASCII range.

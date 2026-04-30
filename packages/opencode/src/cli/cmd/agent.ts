@@ -86,6 +86,9 @@ const AVAILABLE_TOOLS = [
   "tabulate",
   "fuzzy",
   "latlon",
+  "unit",
+  "primes",
+  "lorem",
 ]
 
 const AgentCreateCommand = cmd({

@@ -1,0 +1,36 @@
+Generic unit conversion across length, mass, volume, temperature, time, data, speed, area, pressure, energy, power, angle, frequency, and fuel-economy categories.
+
+Use when you need to convert a numeric value between physical or computing units without rolling your own conversion factors. All conversions are pure: no network, no external calls.
+
+Actions:
+- `convert` - convert `value` from `from` unit to `to` unit. Both units must be in the same category. Returns the converted number as `output` and the parsed inputs in metadata. Affine units (Celsius/Fahrenheit/Rankine vs. Kelvin) are handled correctly. Reciprocal fuel-economy (l_100km) is converted via the underlying volume-per-distance form.
+- `categories` - list all known categories.
+- `units` - list units belonging to `category`.
+- `list` - list every (category, unit) pair.
+
+Common parameters:
+- `value` - required for `convert`; the numeric quantity to convert. Can be any finite real number.
+- `from` / `to` - required for `convert`; unit symbols (case-sensitive for SI prefixes; aliases like `feet`, `metre`, `kilometers` are accepted via lowercase fallback). Both must belong to the same category.
+- `category` - required for `units`; one of the supported categories.
+- `precision` - optional; round the converted output to this many decimal places (0-18). Default unrounded.
+
+Categories and example units:
+- `length` - m, cm, mm, km, in, ft, yd, mi, nmi, au, ly, pc
+- `mass` - g, kg, mg, oz, lb, t, st, gr
+- `volume` - L, mL, m3, cm3, gal_us, gal_uk, qt_us, pt_us, fl_oz_us, cup_us, tbsp, tsp
+- `temperature` - C, F, K, R (affine)
+- `time` - ns, us, ms, s, min, h, d, wk, mo (30d), yr (365d)
+- `data` - B, KB, MB, GB, TB, PB, KiB, MiB, GiB, TiB, PiB, bit, Kbit, Mbit, Gbit, Tbit
+- `speed` - mps, kmh, mph, knot, fps
+- `area` - m2, cm2, mm2, km2, in2, ft2, yd2, ac, ha, mi2
+- `pressure` - Pa, kPa, MPa, bar, psi, atm, torr, mmHg
+- `energy` - J, kJ, MJ, cal, kcal, Wh, kWh, eV, BTU
+- `power` - W, kW, MW, hp, BTU_h
+- `angle` - rad, deg, grad, turn, arcmin, arcsec
+- `frequency` - Hz, kHz, MHz, GHz, THz, rpm
+- `fuel_economy` - mpg_us, mpg_uk, kml, l_100km (reciprocal; handled correctly)
+
+Notes:
+- Decimal (KB) vs. binary (KiB) data prefixes are kept distinct. KB = 1000 B, KiB = 1024 B.
+- Months and years are calendar approximations (30 d / 365 d). Do NOT use this for precise calendar arithmetic; use `datetime` instead.
+- Temperature: Celsius/Fahrenheit/Rankine require affine offsets, not just scaling, so you cannot convert a *delta* in Fahrenheit to Kelvin with this tool; convert two absolute temperatures and subtract.

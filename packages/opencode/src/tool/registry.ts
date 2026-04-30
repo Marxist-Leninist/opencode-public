@@ -73,6 +73,9 @@ import { HumanizeTool } from "./humanize"
 import { TabulateTool } from "./tabulate"
 import { FuzzyTool } from "./fuzzy"
 import { LatLonTool } from "./latlon"
+import { UnitTool } from "./unit"
+import { PrimesTool } from "./primes"
+import { LoremTool } from "./lorem"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -237,6 +240,9 @@ export const layer: Layer.Layer<
     const tabulatetool = yield* TabulateTool
     const fuzzytool = yield* FuzzyTool
     const latlontool = yield* LatLonTool
+    const unittool = yield* UnitTool
+    const primestool = yield* PrimesTool
+    const loremtool = yield* LoremTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -387,6 +393,9 @@ export const layer: Layer.Layer<
           tabulate: Tool.init(tabulatetool),
           fuzzy: Tool.init(fuzzytool),
           latlon: Tool.init(latlontool),
+          unit: Tool.init(unittool),
+          primes: Tool.init(primestool),
+          lorem: Tool.init(loremtool),
         })
 
         return {
@@ -468,6 +477,9 @@ export const layer: Layer.Layer<
             tool.tabulate,
             tool.fuzzy,
             tool.latlon,
+            tool.unit,
+            tool.primes,
+            tool.lorem,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
