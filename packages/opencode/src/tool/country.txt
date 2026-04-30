@@ -1,0 +1,30 @@
+Look up ISO 3166-1 country information offline. Useful when validating country codes, normalising user-supplied locale strings, building dropdowns, or resolving codes to names.
+
+ACTIONS
+- lookup: resolve a query (alpha-2, alpha-3, numeric, common name, or case-insensitive substring) to a country record.
+- validate: return whether a code is a valid ISO 3166-1 alpha-2, alpha-3, or numeric code, with the matched country if any.
+- list: list all countries, optionally filtered by region or subregion. Returns alpha-2 codes plus selected fields. Useful for discovery.
+- info: return tool stats (country count, regions, last updated).
+
+OPTIONS
+- query: required for lookup/validate. Examples: "US", "USA", "840", "United States", "germany", or a flag emoji. Case-insensitive.
+- code_kind: optional filter for validate. One of "alpha2" | "alpha3" | "numeric" | "any" (default "any").
+- region: optional filter for list. One of "Africa" | "Americas" | "Asia" | "Europe" | "Oceania" | "Antarctic".
+- subregion: optional filter for list. Examples: "Northern Europe", "Western Asia". Case-insensitive substring match.
+- limit: optional cap on results returned for list/lookup. Default 50, max 300.
+
+DATA RETURNED
+For each matched country:
+- alpha2: 2-letter code, e.g. "US"
+- alpha3: 3-letter code, e.g. "USA"
+- numeric: 3-digit code, e.g. "840"
+- name: common name in English
+- region: continental region
+- subregion: UN M.49 subregion (best-effort)
+- calling_code: international dialling prefix (e.g. "+1"), may be empty for codes that share a NANP block
+- flag: regional indicator emoji derived from the alpha-2
+
+NOTES
+- Data is packed offline and reflects ISO 3166-1 as of 2024. It does not cover ISO 3166-2 subdivisions.
+- Some sovereign-status edge cases (Kosovo, Western Sahara) may be omitted or labelled per the UN list.
+- Case-insensitive matching strips accents, so "cote d'ivoire" resolves to Cote d'Ivoire.

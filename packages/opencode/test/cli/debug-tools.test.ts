@@ -28,4 +28,16 @@ describe("debug tools smoke helpers", () => {
   test("keeps the SG smoke list sorted for stable launched-binary checks", () => {
     expect([...SG_NATIVE_TOOL_IDS].toSorted()).toEqual([...SG_NATIVE_TOOL_IDS])
   })
+
+  test("ids are unique - no accidental duplicate after a merge", () => {
+    expect(new Set(SG_NATIVE_TOOL_IDS).size).toBe(SG_NATIVE_TOOL_IDS.length)
+  })
+
+  test("smoke list covers wait/hash and the new country tool", () => {
+    // These are flagship SG additions; guard against regressing the smoke
+    // list when adding new tools.
+    expect(SG_NATIVE_TOOL_IDS).toContain("wait")
+    expect(SG_NATIVE_TOOL_IDS).toContain("hash")
+    expect(SG_NATIVE_TOOL_IDS).toContain("country")
+  })
 })

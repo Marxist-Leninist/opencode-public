@@ -101,6 +101,7 @@ const AVAILABLE_TOOLS = [
   "bignum",
   "slug",
   "pkce",
+  "country",
 ]
 
 const AgentCreateCommand = cmd({
