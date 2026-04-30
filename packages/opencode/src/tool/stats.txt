@@ -1,0 +1,30 @@
+Compute summary statistics over a sequence of numbers. Pure, deterministic.
+
+Use when you need to characterize a dataset (timing samples, log values, scores, etc.) without leaving the chat to run Python/R/awk.
+
+Actions:
+- `summary` - return count, sum, min, max, mean, median, stddev (sample), variance (sample), p25/p50/p75/p90/p95/p99, range, iqr, skewness, kurtosis_excess, geometric_mean, harmonic_mean.
+- `quantile` - return one or more quantiles. Pass `qs` (each in [0,1]).
+- `histogram` - return a histogram with `bins` equal-width bins (default 10) covering [min,max].
+- `correlation` - Pearson correlation coefficient between `values` and `values2`. Both must be the same length and >= 2.
+- `zscore` - return z-scores (sample stddev) for each value.
+- `normalize` - return min-max-normalized values in [0,1]. If min==max, all zeros.
+- `top` - return the top `k` (default 10) values, descending. Pass `bottom: true` for ascending.
+
+Input formats (mutually exclusive - pass exactly one):
+- `values` - JSON array of numbers.
+- `values_text` - whitespace/comma/newline separated number string. Non-numeric tokens are skipped (and reported via metadata.skipped).
+
+Common parameters:
+- `qs` - array of quantile probabilities for action=quantile.
+- `bins` - bin count for action=histogram. Default 10. Cap 1000.
+- `k` - count for action=top. Default 10. Cap 1000.
+- `bottom` - reverse order for action=top. Default false.
+- `values2` - second array for action=correlation.
+
+Notes:
+- Variance/stddev use the sample formula (divide by n-1) when n>=2; otherwise 0.
+- Quantiles use linear interpolation (R-7 / numpy default).
+- Mode is omitted because numeric data rarely has a clean mode; use `histogram` instead.
+- Geometric and harmonic means require all values > 0; otherwise they are reported as null with a note in metadata.
+- Skewness/kurtosis use the standard sample-population estimators with n>=3 / n>=4 minimums (else null).

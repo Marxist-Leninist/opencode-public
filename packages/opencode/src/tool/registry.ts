@@ -76,6 +76,9 @@ import { LatLonTool } from "./latlon"
 import { UnitTool } from "./unit"
 import { PrimesTool } from "./primes"
 import { LoremTool } from "./lorem"
+import { MaskTool } from "./mask"
+import { ChunkTool } from "./chunk"
+import { StatsTool } from "./stats"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -243,6 +246,9 @@ export const layer: Layer.Layer<
     const unittool = yield* UnitTool
     const primestool = yield* PrimesTool
     const loremtool = yield* LoremTool
+    const masktool = yield* MaskTool
+    const chunktool = yield* ChunkTool
+    const statstool = yield* StatsTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -396,6 +402,9 @@ export const layer: Layer.Layer<
           unit: Tool.init(unittool),
           primes: Tool.init(primestool),
           lorem: Tool.init(loremtool),
+          mask: Tool.init(masktool),
+          chunk: Tool.init(chunktool),
+          stats: Tool.init(statstool),
         })
 
         return {
@@ -480,6 +489,9 @@ export const layer: Layer.Layer<
             tool.unit,
             tool.primes,
             tool.lorem,
+            tool.mask,
+            tool.chunk,
+            tool.stats,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

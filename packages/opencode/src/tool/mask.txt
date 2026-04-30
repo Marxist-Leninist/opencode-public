@@ -1,0 +1,45 @@
+Detect and redact common PII / secret patterns in text.
+
+Use this before pasting logs, transcripts, or scraped pages into a model that should not see emails, phone numbers, credit cards, API keys, JWTs, or private keys.
+
+Actions:
+- `redact` - return the input with every detected match replaced by a placeholder.
+- `detect` - return a list of detected matches with `kind`, `value`, `start`, `end`. The original text is unchanged.
+- `count` - return per-kind counts only. No values are returned.
+
+Detected kinds (always-on unless excluded via `kinds`):
+- `email` - RFC-5321-ish address
+- `phone` - liberal NANP / international phone (>=7 digits with separators)
+- `ipv4` - dotted-quad
+- `ipv6` - hex-colon
+- `mac` - 6-octet MAC (colon or hyphen)
+- `url` - http/https URL
+- `credit_card` - 13-19 digit Luhn-valid sequence (Visa/MC/Amex/Discover/Diners/JCB/UnionPay prefixes)
+- `ssn` - U.S. social security XXX-XX-XXXX
+- `jwt` - three base64url segments separated by dots
+- `bearer` - "Bearer <token>" auth header values (the token, not the literal "Bearer")
+- `aws_access_key` - "AKIA"|"ASIA" + 16 base32 chars
+- `github_token` - "ghp_/gho_/ghu_/ghs_/ghr_" + 36+ chars
+- `slack_token` - "xox[abprs]-..." token
+- `gcp_api_key` - "AIza" + 35 chars
+- `private_key_pem` - "-----BEGIN ... PRIVATE KEY-----" block
+- `password_query` - "password=" / "passwd=" / "pwd=" parameter values in URLs/forms
+
+Placeholder modes (action=redact):
+- `placeholder` (default) - replace with `[REDACTED:<kind>]`.
+- `partial` - keep the first 2 and last 2 characters; replace the middle with `*`. Useful for masking a card while keeping enough for a human to recognise.
+- `hash` - replace with `<kind>-<8-hex of sha256>`. Stable across same input. Lets you correlate occurrences without revealing the value.
+- `delete` - drop the match entirely (with no placeholder).
+
+Parameters:
+- `text` - the input. Required.
+- `kinds` - optional explicit list of kinds to match. Default: all listed kinds.
+- `exclude` - optional kinds to skip even if in `kinds`. Useful with the default set.
+- `mode` - placeholder | partial | hash | delete (action=redact only). Default `placeholder`.
+- `custom` - extra `[{ name, regex, flags }]` entries to detect on top of the built-ins. `regex` is a JS RegExp source string. Reported under `kind` = the supplied `name`.
+
+Notes:
+- Matches are non-overlapping and greedy in text-order. Once a span is consumed by an earlier kind it is not re-matched.
+- Email and url detection is intentionally permissive; expect occasional false positives in code-like text.
+- credit_card is Luhn-validated; bare strings of digits without a recognised brand prefix are skipped.
+- Output is bounded by the same truncation logic as other tools - for very large inputs prefer `count` or `detect` with `limit`.

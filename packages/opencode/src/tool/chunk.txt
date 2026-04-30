@@ -1,0 +1,35 @@
+Split text into smaller chunks with optional overlap.
+
+Use when feeding a long document to a model with a smaller context window, sharding text for embedding, or breaking up output for piecewise processing. Pure function - no side effects, deterministic.
+
+Actions:
+- `chars` - split into chunks of N characters. Cap N=200000 per chunk.
+- `lines` - split into chunks of N lines. Cap N=10000 per chunk.
+- `words` - split into chunks of N whitespace-separated words. Cap N=50000.
+- `tokens` - split into chunks of approximately N tokens (heuristic: 1 token ~= 4 chars; uses a word/char hybrid). Cap N=200000.
+- `paragraphs` - group every N paragraphs (paragraphs separated by blank lines) per chunk. Cap N=1000.
+- `bytes` - split into chunks of approximately N UTF-8 bytes, never breaking inside a multi-byte codepoint. Cap N=1000000.
+- `count` - report the total length under each metric without producing chunks. Useful for choosing a `size`.
+
+Common parameters:
+- `text` - input text. Required for all actions. Cap 5,000,000 chars.
+- `size` - chunk size in the unit chosen by `action`. Required except for `count`.
+- `overlap` - overlap between consecutive chunks in the same unit. Default 0. Must be < `size`. The overlap window is taken from the end of the previous chunk (so chunk n+1 starts `size - overlap` units after chunk n).
+- `keep_separator` - for `lines` and `paragraphs`, keep the original separator at the chunk boundary. Default true.
+- `trim` - trim whitespace from each chunk. Default false.
+- `limit` - cap on number of chunks returned (safety). Default 10000.
+
+Return shape (action != count):
+- output - JSON array of `{ index, start, end, length, text }`.
+- metadata.chunk_count - number of chunks.
+- metadata.total_length - total length of input in the chosen unit.
+- metadata.truncated - true if the chunk count was capped by `limit`.
+
+Return shape (action = count):
+- output - human-readable summary lines.
+- metadata.chars / lines / words / tokens_est / paragraphs / bytes_utf8 - integer totals.
+
+Notes:
+- `tokens` is an estimate: `Math.ceil(max(chars/4, words*0.75))`. It overcounts whitespace and undercounts long compound words. Use it as a planning heuristic, not for billing.
+- `bytes` mode never returns a chunk that contains a half codepoint; if a codepoint won't fit, the chunk ends a few bytes early.
+- For binary files use `read` first to get base64 content, then `chunk` it as `chars`.
