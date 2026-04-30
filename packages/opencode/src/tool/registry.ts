@@ -83,6 +83,7 @@ import { TreeTool } from "./tree"
 import { UlidTool } from "./ulid"
 import { PowerShellTool } from "./powershell"
 import { ICalTool } from "./ical"
+import { GraphQLTool } from "./graphql"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -257,6 +258,7 @@ export const layer: Layer.Layer<
     const ulidtool = yield* UlidTool
     const powershelltool = yield* PowerShellTool
     const icaltool = yield* ICalTool
+    const graphqltool = yield* GraphQLTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -417,6 +419,7 @@ export const layer: Layer.Layer<
           ulid: Tool.init(ulidtool),
           powershell: Tool.init(powershelltool),
           ical: Tool.init(icaltool),
+          graphql: Tool.init(graphqltool),
         })
 
         return {
@@ -508,6 +511,7 @@ export const layer: Layer.Layer<
             tool.ulid,
             tool.powershell,
             tool.ical,
+            tool.graphql,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

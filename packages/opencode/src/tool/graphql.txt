@@ -1,0 +1,46 @@
+Send a GraphQL query or mutation against an HTTP(s) endpoint.
+
+WHEN TO USE
+- Hitting any GraphQL API (GitHub v4, Hasura, Shopify Storefront, etc.) where the http tool would force you to hand-build the JSON envelope and parse the result.
+- One-off introspection: `query { __schema { types { name } } }`.
+- Mutations that need variables, e.g. `mutation($id:ID!) { delete(id:$id) { ok } }`.
+
+WHEN NOT TO USE
+- Subscriptions / streaming — that's a websocket protocol; this tool only does single request/response.
+- Plain REST — use the http tool.
+- File uploads (multipart/form-data per the GraphQL multipart spec) — not yet supported, fall back to http with hand-crafted body.
+
+REQUEST SHAPE
+- `url`: GraphQL endpoint.
+- `query`: the GraphQL document (query, mutation, or subscription text).
+- `variables`: optional `{ name: value }` map; sent as JSON.
+- `operation_name`: required only when the document declares more than one named operation.
+- `headers`: free-form headers. `Content-Type` and `Accept` default to `application/json`.
+- `auth_bearer`: shortcut for `Authorization: Bearer <token>`. Mutually exclusive with `headers.Authorization`.
+- `method`: defaults to `POST` (per spec). `GET` packs query/variables/operationName into the URL query string and is only useful for read-only public endpoints.
+
+RESPONSE HANDLING
+- Body is parsed as JSON.
+- `data` is surfaced as `metadata.has_data`.
+- `errors` array is surfaced as `metadata.has_errors`, `error_count`, and `error_messages` (first 10).
+- By default, a non-empty `errors` array makes `metadata.ok = false` even when an HTTP 200 came back. Set `fail_on_graphql_errors: false` to inspect partial results.
+
+ROBUSTNESS
+- `timeout_ms` (default 30s, max 600s) bounds every roundtrip.
+- `max_retries` (default 0) retries on transport error or 5xx with exponential backoff (`retry_delay_ms` × 2^attempt).
+- `max_bytes` caps the response body (default 5 MB) — bigger responses are reported `truncated: true`.
+
+LOGGING SAFETY
+- `redact_headers` (default true) replaces Authorization, Cookie, Set-Cookie, X-API-* values with `[redacted]` in metadata. Set to false only when you really need them in the log.
+
+EXAMPLES
+- Public GitHub example (replace token):
+    url: "https://api.github.com/graphql"
+    auth_bearer: "<token>"
+    query: "query($name:String!){ user(login:$name){ name bio } }"
+    variables: { name: "octocat" }
+
+- Introspect schema:
+    url: "https://countries.trevorblades.com/"
+    query: "{ __schema { types { name kind } } }"
+    method: "GET"

@@ -96,6 +96,7 @@ const AVAILABLE_TOOLS = [
   "ulid",
   "powershell",
   "ical",
+  "graphql",
 ]
 
 const AgentCreateCommand = cmd({
