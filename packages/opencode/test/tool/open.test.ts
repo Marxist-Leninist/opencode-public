@@ -110,23 +110,33 @@ describe("tool.open", () => {
     ),
   )
 
-  it.live("classifies a real local file as kind=file", () =>
+  it.live("resolves a real local file before asking open permission", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         const target = nodePath.join(dir, "report.txt")
         yield* Effect.promise(() => fs.writeFile(target, "hello"))
+        const calls: Array<Parameters<Tool.Context["ask"]>[0]> = []
 
-        // We can't reliably actually open a file in CI without spawning a GUI app,
-        // so we exercise the classification + resolution path and accept either
-        // delivered=true (test runner is interactive) or delivered=false with a
-        // sensible kind/resolved metadata payload.
         const toolInfo = yield* OpenTool
         const tool = yield* toolInfo.init()
-        const result = yield* tool.execute({ target: "report.txt" }, baseCtx)
+        const exit = yield* Effect.exit(
+          tool.execute(
+            { target: "report.txt" },
+            {
+              ...baseCtx,
+              ask: (input) =>
+                Effect.sync(() => {
+                  calls.push(input)
+                  throw new Error("permission probe")
+                }),
+            },
+          ),
+        )
 
-        expect(result.metadata.kind).toBe("file")
-        expect(typeof result.metadata.resolved).toBe("string")
-        expect(result.metadata.resolved!.endsWith("report.txt")).toBe(true)
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.metadata.kind).toBe("file")
+        expect(calls[0]!.patterns).toEqual([target])
       }),
     ),
   )

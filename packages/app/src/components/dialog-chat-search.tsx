@@ -9,6 +9,7 @@ import { useGlobalSDK } from "@/context/global-sdk"
 import { useModels } from "@/context/models"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
+import { useProviders } from "@/hooks/use-providers"
 
 type ChatSearchHit = {
   messageID: string
@@ -49,6 +50,11 @@ type AugmentResponse = SearchResponse & {
 
 type Mode = "classic" | "ai"
 
+const CHAT_SEARCH_PRESET_MODEL = {
+  providerID: "openrouter",
+  modelID: "openrouter/auto",
+} as const
+
 export function DialogChatSearch(props: { initialDirectory?: string }) {
   const dialog = useDialog()
   const navigate = useNavigate()
@@ -56,6 +62,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   const server = useServer()
   const platform = usePlatform()
   const models = useModels()
+  const providers = useProviders()
 
   const [query, setQuery] = createSignal("")
   const [mode, setMode] = createSignal<Mode>("classic")
@@ -63,14 +70,29 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   const [error, setError] = createSignal("")
   const [results, setResults] = createSignal<ChatSearchResult[]>([])
   const [answer, setAnswer] = createSignal("")
+  const [aiDebug, setAiDebug] = createSignal("")
   const [selectedModel, setSelectedModel] = createSignal("")
+  const [selectedModelTouched, setSelectedModelTouched] = createSignal(false)
 
-  const visibleModels = createMemo(() =>
-    models
+  const chatSearchPreset = createMemo(() => {
+    const provider = providers.all().find((item) => item.id === CHAT_SEARCH_PRESET_MODEL.providerID)
+    const model = provider?.models[CHAT_SEARCH_PRESET_MODEL.modelID]
+    if (!provider || !model) return
+    return { ...model, provider }
+  })
+
+  const visibleModels = createMemo(() => {
+    const list = models
       .list()
       .filter((model) => models.visible({ providerID: model.provider.id, modelID: model.id }))
-      .sort((a, b) => a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name)),
-  )
+      .sort((a, b) => a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name))
+    const preset = chatSearchPreset()
+    if (!preset) return list
+    return [
+      preset,
+      ...list.filter((model) => model.provider.id !== preset.provider.id || model.id !== preset.id),
+    ]
+  })
 
   const preferredModel = createMemo(() => {
     const list = visibleModels()
@@ -79,6 +101,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
       .map((item) => list.find((model) => model.provider.id === item.providerID && model.id === item.modelID))
       .find(Boolean)
     return (
+      chatSearchPreset() ??
       list.find((model) => /deepseek/i.test(`${model.provider.name} ${model.name} ${model.id}`)) ??
       list.find((model) => /ring/i.test(`${model.provider.name} ${model.name} ${model.id}`)) ??
       recent ??
@@ -87,7 +110,7 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   })
 
   createEffect(() => {
-    if (selectedModel()) return
+    if (selectedModelTouched()) return
     const model = preferredModel()
     if (model) setSelectedModel(`${model.provider.id}/${model.id}`)
   })
@@ -124,17 +147,42 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
     return { providerID, modelID }
   }
 
+  function modelLabel(ref?: { providerID: string; modelID: string }) {
+    if (!ref) return "selected model"
+    const model = visibleModels().find((item) => item.provider.id === ref.providerID && item.id === ref.modelID)
+    return model ? `${model.provider.name} / ${model.name}` : `${ref.providerID}/${ref.modelID}`
+  }
+
+  function classicSearch(trimmed: string) {
+    const params = new URLSearchParams({
+      query: trimmed,
+      limit: "20",
+    })
+    if (props.initialDirectory) params.set("directory", props.initialDirectory)
+    return request<SearchResponse>(`/session/search?${params.toString()}`, {
+      headers: headers(),
+    })
+  }
+
   async function run(nextMode = mode()) {
+    setMode(nextMode)
     const trimmed = query().trim()
     if (!trimmed) return
 
-    setMode(nextMode)
     setBusy(true)
     setError("")
+    setAiDebug("")
     if (nextMode === "classic") setAnswer("")
 
     try {
       if (nextMode === "ai") {
+        setAnswer("")
+        setAiDebug("Classic search running...")
+        const classic = await classicSearch(trimmed)
+        setResults(classic.results)
+        setAiDebug(
+          `Classic search shown: ${classic.results.length} ${classic.results.length === 1 ? "match" : "matches"}. AI running...`,
+        )
         const response = await request<AugmentResponse>("/session/search/augment", {
           method: "POST",
           headers: headers(true),
@@ -147,20 +195,15 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
         })
         setAnswer(response.answer)
         setResults(response.results)
+        setAiDebug(`AI response received from ${modelLabel(response.model)}.`)
         return
       }
 
-      const params = new URLSearchParams({
-        query: trimmed,
-        limit: "20",
-      })
-      if (props.initialDirectory) params.set("directory", props.initialDirectory)
-      const response = await request<SearchResponse>(`/session/search?${params.toString()}`, {
-        headers: headers(),
-      })
+      const response = await classicSearch(trimmed)
       setResults(response.results)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
+      if (nextMode === "ai") setAiDebug("AI search failed before a response was received.")
     } finally {
       setBusy(false)
     }
@@ -216,7 +259,10 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
                 "bg-surface-raised text-text-strong": mode() === "classic",
                 "bg-transparent text-text-base hover:bg-surface-base-hover": mode() !== "classic",
               }}
-              onClick={() => void run("classic")}
+              onClick={() => {
+                setMode("classic")
+                if (query().trim()) void run("classic")
+              }}
             >
               Classic
             </button>
@@ -227,7 +273,10 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
                 "bg-surface-raised text-text-strong": mode() === "ai",
                 "bg-transparent text-text-base hover:bg-surface-base-hover": mode() !== "ai",
               }}
-              onClick={() => void run("ai")}
+              onClick={() => {
+                setMode("ai")
+                if (query().trim()) void run("ai")
+              }}
             >
               AI
             </button>
@@ -236,7 +285,10 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
           <Show when={mode() === "ai"}>
             <select
               value={selectedModel()}
-              onChange={(event) => setSelectedModel(event.currentTarget.value)}
+              onChange={(event) => {
+                setSelectedModelTouched(true)
+                setSelectedModel(event.currentTarget.value)
+              }}
               class="h-8 max-w-[360px] rounded-md border border-border-base bg-surface-base px-2 text-13-regular text-text-base outline-none"
             >
               <For each={visibleModels()}>
@@ -253,6 +305,12 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
         <Show when={error()}>
           <div class="rounded-md border border-border-critical bg-surface-base px-3 py-2 text-13-regular text-text-critical">
             {error()}
+          </div>
+        </Show>
+
+        <Show when={mode() === "ai" && aiDebug()}>
+          <div class="rounded-md border border-border-base bg-surface-base px-3 py-2 text-12-regular text-text-weak">
+            {aiDebug()}
           </div>
         </Show>
 

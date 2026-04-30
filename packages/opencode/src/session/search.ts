@@ -9,8 +9,11 @@ import { Provider } from "@/provider"
 
 const DEFAULT_LIMIT = 20
 const DEFAULT_SCAN_LIMIT = 500
+const DEFAULT_SEMANTIC_SCAN_LIMIT = 80
 const MAX_LIMIT = 50
 const MAX_SCAN_LIMIT = 2_000
+const MAX_SEMANTIC_CANDIDATES = 30
+const MAX_SEMANTIC_HITS = 4
 const MAX_PART_TEXT = 10_000
 const MAX_RESULT_TEXT = 2_000
 const MAX_SNIPPET = 280
@@ -184,6 +187,31 @@ export namespace SessionSearch {
     return hits.sort((a, b) => b.score - a.score)
   }
 
+  function previewHits(input: {
+    message: MessageV2.WithParts
+    query: string
+    queryTerms: string[]
+  }): Hit[] {
+    const hits: Hit[] = []
+    for (const part of input.message.parts) {
+      const raw = partText(part)
+      if (!raw) continue
+
+      const text = trimText(raw, MAX_PART_TEXT)
+      hits.push({
+        messageID: input.message.info.id,
+        partID: part.id,
+        role: input.message.info.role,
+        type: part.type,
+        text: truncate(text, MAX_RESULT_TEXT),
+        snippet: snippet(text, input.query, input.queryTerms),
+        score: 1,
+        time: input.message.info.time.created,
+      })
+    }
+    return hits
+  }
+
   export const search = Effect.fn("SessionSearch.search")(function* (input: Input) {
     const query = input.query.trim()
     const queryTerms = terms(query)
@@ -240,12 +268,177 @@ export namespace SessionSearch {
     }))
   }
 
+  function buildSemanticContext(results: Result[]) {
+    return results.slice(0, MAX_SEMANTIC_CANDIDATES).map((result, index) => ({
+      rank: index + 1,
+      sessionID: result.session.id,
+      title: result.session.title,
+      directory: result.session.directory,
+      updated: new Date(result.session.time.updated).toISOString(),
+      preview: result.hits.slice(0, MAX_SEMANTIC_HITS).map((hit) => ({
+        role: hit.role,
+        type: hit.type,
+        snippet: hit.snippet.slice(0, 500),
+      })),
+    }))
+  }
+
+  function jsonObjectCandidates(text: string) {
+    const candidates: string[] = []
+    let start = -1
+    let depth = 0
+    let inString = false
+    let escaping = false
+
+    for (let index = 0; index < text.length; index++) {
+      const char = text[index]
+      if (inString) {
+        if (escaping) {
+          escaping = false
+          continue
+        }
+        if (char === "\\") {
+          escaping = true
+          continue
+        }
+        if (char === '"') inString = false
+        continue
+      }
+
+      if (char === '"') {
+        inString = true
+        continue
+      }
+      if (char === "{") {
+        if (depth === 0) start = index
+        depth++
+        continue
+      }
+      if (char === "}" && depth > 0) {
+        depth--
+        if (depth === 0 && start >= 0) {
+          candidates.push(text.slice(start, index + 1))
+          start = -1
+        }
+      }
+    }
+
+    return candidates
+  }
+
+  export function parseSemanticResult(text: string, validIDs: Set<string>) {
+    const fallback = text.trim()
+
+    for (const candidate of jsonObjectCandidates(text)) {
+      try {
+        const parsed = JSON.parse(candidate) as { answer?: unknown; sessionIDs?: unknown }
+        const seen = new Set<string>()
+        return {
+          answer: typeof parsed.answer === "string" ? parsed.answer.trim() : fallback,
+          sessionIDs: Array.isArray(parsed.sessionIDs)
+            ? parsed.sessionIDs.filter((item): item is string => {
+                if (typeof item !== "string" || !validIDs.has(item) || seen.has(item)) return false
+                seen.add(item)
+                return true
+              })
+            : [],
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return { answer: fallback, sessionIDs: [] as string[] }
+  }
+
+  const semanticCandidates = Effect.fn("SessionSearch.semanticCandidates")(function* (input: Input) {
+    const query = input.query.trim()
+    const queryTerms = terms(query)
+    const scanLimit = Math.min(input.scanLimit ?? DEFAULT_SEMANTIC_SCAN_LIMIT, MAX_SCAN_LIMIT)
+    const session = yield* Session.Service
+
+    const sessions = yield* Effect.promise(async () => {
+      const out: Session.Info[] = []
+      for await (const item of Session.list({
+        directory: input.directory,
+        limit: scanLimit,
+      })) {
+        out.push(item)
+      }
+      return out
+    })
+
+    const results: Result[] = []
+    for (const item of sessions) {
+      if (!input.includeArchived && item.time.archived) continue
+
+      const messages = yield* session.messages({ sessionID: item.id })
+      const hits = messages
+        .slice()
+        .reverse()
+        .flatMap((message) => previewHits({ message, query, queryTerms }))
+        .slice(0, MAX_SEMANTIC_HITS)
+
+      if (!item.title && hits.length === 0) continue
+      results.push({
+        session: item,
+        score: Math.max(1, scoreText(query, queryTerms, item.title, true)),
+        hits,
+      })
+    }
+
+    return results.slice(0, MAX_SEMANTIC_CANDIDATES)
+  })
+
   export const augment = Effect.fn("SessionSearch.augment")(function* (input: AugmentInput) {
     const response = yield* search(input)
     const provider = yield* Provider.Service
     const ref = input.model ?? (yield* provider.defaultModel())
 
     if (response.results.length === 0) {
+      const candidates = yield* semanticCandidates(input)
+      if (candidates.length > 0) {
+        const model = yield* provider.getModel(ref.providerID, ref.modelID)
+        const language = yield* provider.getLanguage(model)
+        const generated = yield* Effect.tryPromise({
+          try: () =>
+            generateText({
+              model: language,
+              temperature: 0,
+              maxOutputTokens: 700,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    'You search prior OpenCode chats. Use only the provided candidate previews. Return strict JSON with shape {"answer":"...","sessionIDs":["..."]}. Include only genuinely relevant sessionIDs, ordered by relevance. If nothing is relevant, return an empty sessionIDs array.',
+                },
+                {
+                  role: "user",
+                  content: JSON.stringify({
+                    query: response.query,
+                    candidates: buildSemanticContext(candidates),
+                  }),
+                },
+              ],
+            }),
+          catch: (cause) => cause,
+        })
+        const parsed = parseSemanticResult(
+          generated.text,
+          new Set(candidates.map((candidate) => candidate.session.id)),
+        )
+        const ranked = parsed.sessionIDs
+          .map((sessionID) => candidates.find((candidate) => candidate.session.id === sessionID))
+          .filter((candidate): candidate is Result => Boolean(candidate))
+
+        return {
+          query: response.query,
+          answer: parsed.answer || "No matching chats found.",
+          model: ref,
+          results: ranked.slice(0, input.limit ?? DEFAULT_LIMIT),
+        }
+      }
+
       return {
         query: response.query,
         answer: "No matching chats found.",
