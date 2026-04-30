@@ -1079,6 +1079,13 @@ export default function Layout(props: ParentProps) {
         onSelect: () => openChatSearch(),
       },
       {
+        id: "robotics.open",
+        title: "Robot lab",
+        category: language.t("command.category.view"),
+        disabled: !params.dir,
+        onSelect: () => openRobotics(),
+      },
+      {
         id: "session.next",
         title: language.t("command.session.next"),
         category: language.t("command.category.session"),
@@ -1233,6 +1240,12 @@ export default function Layout(props: ParentProps) {
 
   function openChatSearch() {
     dialog.show(() => <DialogChatSearch initialDirectory={currentDir() || undefined} />)
+  }
+
+  function openRobotics() {
+    const dir = currentDir() || currentProject()?.worktree
+    if (!dir) return
+    navigateWithSidebarReset(`/${base64Encode(dir)}/robotics`)
   }
 
   function projectRoot(directory: string) {
@@ -2261,6 +2274,15 @@ export default function Layout(props: ParentProps) {
                         >
                           Automations
                         </Button>
+                        <Button
+                          size="large"
+                          icon="window-cursor"
+                          variant={location.pathname.endsWith("/robotics") ? "secondary" : "ghost"}
+                          class="w-full"
+                          onClick={openRobotics}
+                        >
+                          Robot lab
+                        </Button>
                       </div>
                       <div class="flex-1 min-h-0">
                         <LocalWorkspace
@@ -2308,6 +2330,15 @@ export default function Layout(props: ParentProps) {
                         }}
                       >
                         Automations
+                      </Button>
+                      <Button
+                        size="large"
+                        icon="window-cursor"
+                        variant={location.pathname.endsWith("/robotics") ? "secondary" : "ghost"}
+                        class="w-full"
+                        onClick={openRobotics}
+                      >
+                        Robot lab
                       </Button>
                     </div>
                     <div class="relative flex-1 min-h-0">

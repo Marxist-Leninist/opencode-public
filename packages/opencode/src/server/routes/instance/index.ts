@@ -33,6 +33,7 @@ import { SyncRoutes } from "./sync"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
 import { AutomationRoutes } from "./automation"
+import { RobotRoutes } from "./robot"
 
 export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
   const app = new Hono()
@@ -103,6 +104,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/mcp", McpRoutes())
+    .route("/robot", RobotRoutes())
     .route("/tui", TuiRoutes())
     .post(
       "/instance/dispose",

@@ -274,6 +274,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
+  const openRobotSim = () => {
+    void import("@/components/dialog-robot-sim").then((x) => {
+      dialog.show(() => <x.DialogRobotSim />)
+    })
+  }
+
   const toggleAutoAccept = () => {
     const sessionID = params.id
     if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
@@ -551,6 +557,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       description: "Add a new MCP server (local stdio or remote HTTP/SSE)",
       slash: "mcp-add",
       onSelect: addMcp,
+    }),
+    mcpCommand({
+      id: "robot.sim",
+      title: "Robot sim (experimental)",
+      description: "3D PBR arm + FPV camera + AI control loop",
+      slash: "robot-sim",
+      onSelect: openRobotSim,
     }),
   ]
 
