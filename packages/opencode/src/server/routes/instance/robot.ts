@@ -20,7 +20,7 @@ const Joints = z.object({
 const StepInput = z.object({
   goal: z.string().min(1).max(1000),
   fpv: z.string().min(1).optional().describe("Data URL or base64 PNG of the robot's first-person view"),
-  scene: z.string().optional().describe("Optional god-eye context image"),
+  scene: z.string().optional().describe("Deprecated optional god-eye context image; ignored by this route"),
   sceneDescription: z
     .string()
     .max(4000)
@@ -54,7 +54,7 @@ const ActionResponse = z.object({
 const SYSTEM_PROMPT = `You are a robotic arm controller for an experimental SG OpenCode simulator.
 
 You may receive either:
-- image mode: the robot's first-person camera frame (FPV), optionally with a god-eye context image
+- image mode: the robot's first-person camera frame (FPV)
 - text-observation mode: a structured text description extracted from the simulator's image/pose state for text-only models
 
 Treat the text observation as a compact representation of the image. The arm has 5 controllable joints:
@@ -206,17 +206,18 @@ Target held: ${body.targetHeld ?? false}`
         > = [{ type: "text", text: stateText }]
 
         if (supportsImage && body.fpv) {
+          // Real-hardware parity: vision models see ONLY what the robot's camera sees.
+          // We deliberately do NOT send the structured sceneDescription here; that field is
+          // simulator ground-truth (target screen offsets, world distances, etc.) which a real
+          // robot would never have. Forcing image-only here means whatever the model learns
+          // in sim transfers cleanly to a real arm with the same camera mount.
           const fpv = stripDataUrl(body.fpv)
-          userParts.push({ type: "text", text: "Mode: image. First-person view follows." })
+          userParts.push({
+            type: "text",
+            text:
+              "Mode: image. The first-person camera frame is the only observation. Reason about pixel-space (where is the target in the frame, how big does it look) not world coordinates.",
+          })
           userParts.push({ type: "image", image: fpv.data, mediaType: fpv.mediaType })
-          if (body.scene) {
-            const sceneImage = stripDataUrl(body.scene)
-            userParts.push({ type: "text", text: "God-eye context (for reference only):" })
-            userParts.push({ type: "image", image: sceneImage.data, mediaType: sceneImage.mediaType })
-          }
-          if (body.sceneDescription) {
-            userParts.push({ type: "text", text: `Structured scene observation:\n${body.sceneDescription}` })
-          }
         } else if (body.sceneDescription) {
           userParts.push({
             type: "text",
@@ -268,3 +269,10 @@ Target held: ${body.targetHeld ?? false}`
       }),
   ),
 )
+
+export const __testing = {
+  canSendImages,
+  isKnownTextOnlyModel,
+  stripDataUrl,
+  tryParseAction,
+}

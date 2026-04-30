@@ -1,7 +1,7 @@
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Tag } from "@opencode-ai/ui/tag"
-import { batch, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useLocal } from "@/context/local"
@@ -58,9 +58,21 @@ type RobotAction = {
   supportsImage?: boolean
 }
 
+type PixelObservation = {
+  detected: boolean
+  offsetX: number
+  offsetY: number
+  areaPct: number
+  confidence: number
+  apparentDiameterPx: number
+  estimatedDepth: number
+}
+
 const DEFAULT_POSE: RobotPose = { x: 0, y: 42, z: 28, yaw: 0, grip: 42 }
 const DEFAULT_TARGET: TargetPose = { x: 22, y: 64, z: 36 }
 const ZERO_COMMAND: RobotCommand = { x: 0, y: 0, z: 0, yaw: 0, grip: 0, label: "awaiting image" }
+const TARGET_REAL_DIAMETER_M = 0.08
+const ESTIMATED_FOCAL_PX = 160
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const distance = (pose: RobotPose, target: TargetPose) =>
@@ -105,6 +117,87 @@ function applyCommand(pose: RobotPose, command: RobotCommand): RobotPose {
     z: clamp(pose.z + command.z, 8, 64),
     yaw: clamp(pose.yaw + command.yaw, -55, 55),
     grip: clamp(pose.grip + command.grip, 0, 100),
+  }
+}
+
+function analyzeTargetPixels(source: HTMLCanvasElement): PixelObservation {
+  const sample = document.createElement("canvas")
+  sample.width = 160
+  sample.height = 90
+  const ctx = sample.getContext("2d", { willReadFrequently: true })
+  if (!ctx) {
+    return {
+      detected: false,
+      offsetX: 0,
+      offsetY: 0,
+      areaPct: 0,
+      confidence: 0,
+      apparentDiameterPx: 0,
+      estimatedDepth: 0,
+    }
+  }
+
+  ctx.drawImage(source, 0, 0, sample.width, sample.height)
+  const { data, width, height } = ctx.getImageData(0, 0, sample.width, sample.height)
+  let sumX = 0
+  let sumY = 0
+  let sumW = 0
+  let count = 0
+  let minX = width
+  let minY = height
+  let maxX = -1
+  let maxY = -1
+
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index]
+    const g = data[index + 1]
+    const b = data[index + 2]
+    const x = (index / 4) % width
+    const y = Math.floor(index / 4 / width)
+
+    const orangeLike = r > 135 && g > 80 && g < 230 && b < 120 && r > g * 1.08
+    const emissiveWarm = r > 160 && g > 110 && b < 95
+    if (!orangeLike && !emissiveWarm) continue
+
+    const weight = r * 1.3 + g * 0.6 - b * 0.4
+    count++
+    sumW += weight
+    sumX += x * weight
+    sumY += y * weight
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+
+  if (count < 12 || sumW <= 0) {
+    return {
+      detected: false,
+      offsetX: 0,
+      offsetY: 0,
+      areaPct: 0,
+      confidence: 0,
+      apparentDiameterPx: 0,
+      estimatedDepth: 0,
+    }
+  }
+
+  const centerX = sumX / sumW
+  const centerY = sumY / sumW
+  const bboxWidth = Math.max(1, maxX - minX + 1)
+  const bboxHeight = Math.max(1, maxY - minY + 1)
+  const apparentDiameterPx = Math.max(bboxWidth, bboxHeight)
+  const areaPct = (count / (width * height)) * 100
+  const estimatedDepth = (TARGET_REAL_DIAMETER_M * ESTIMATED_FOCAL_PX) / apparentDiameterPx
+
+  return {
+    detected: true,
+    offsetX: ((centerX / width) - 0.5) * 100,
+    offsetY: ((centerY / height) - 0.5) * 100,
+    areaPct,
+    confidence: clamp(areaPct / 3.5, 0.15, 0.99),
+    apparentDiameterPx,
+    estimatedDepth,
   }
 }
 
@@ -432,6 +525,14 @@ function setupRobotScene(
 }
 
 const ROBOT_MODEL_STORAGE = "opencode.robotLab.model"
+const PREFERRED_VISION_MODELS = [
+  "openrouter/openai/gpt-5.5",
+  "openrouter/google/gemini-3.1-pro-preview",
+  "openrouter/anthropic/claude-opus-4.7",
+  "openai/gpt-5.5",
+  "google/gemini-3.1-pro-preview",
+  "anthropic/claude-opus-4.7",
+]
 
 export default function Robotics() {
   let viewportRef: HTMLDivElement | undefined
@@ -441,12 +542,45 @@ export default function Robotics() {
   const platform = usePlatform()
   const server = useServer()
 
-  const visibleRobotModels = createMemo(() =>
+  // Models that advertise image input AND aren't on the SG text-only deny-list (deepseek/*, mercury-2,
+  // openrouter/auto, openrouter/free; see canSendImages() in packages/opencode/src/server/routes/instance/robot.ts).
+  // Robot lab defaults to vision-capable only; toggle below shows text-only models too.
+  const isKnownTextOnly = (providerID: string, modelID: string) => {
+    const k = `${providerID}/${modelID}`.toLowerCase()
+    return (
+      k.includes("deepseek") ||
+      k.includes("mercury-2") ||
+      k.includes("mercury-coder") ||
+      k.includes("openrouter/auto") ||
+      k.includes("openrouter/free")
+    )
+  }
+  const isVisionCapable = (m: { provider: { id: string }; id: string; capabilities?: { input?: { image?: boolean } } }) => {
+    if (isKnownTextOnly(m.provider.id, m.id)) return false
+    return Boolean(m.capabilities?.input?.image)
+  }
+  const [showAllModels, setShowAllModels] = createSignal(false)
+  const rankRobotModel = (providerID: string, modelID: string) => {
+    const key = `${providerID}/${modelID}`
+    const preferred = PREFERRED_VISION_MODELS.indexOf(key)
+    return preferred === -1 ? Number.MAX_SAFE_INTEGER : preferred
+  }
+  const allRobotModels = createMemo(() =>
     models
       .list()
-      .filter((m) => models.visible({ providerID: m.provider.id, modelID: m.id }))
-      .sort((a, b) => a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name)),
+      .sort((a, b) => {
+        const rank = rankRobotModel(a.provider.id, a.id) - rankRobotModel(b.provider.id, b.id)
+        if (rank !== 0) return rank
+        return a.provider.name.localeCompare(b.provider.name) || a.name.localeCompare(b.name)
+      }),
   )
+  const visibleRobotModels = createMemo(() => {
+    const all = allRobotModels()
+    if (showAllModels()) return all
+    const vision = all.filter(isVisionCapable)
+    return vision.length > 0 ? vision : all
+  })
+  const defaultVisionModel = createMemo(() => visibleRobotModels().find(isVisionCapable) ?? allRobotModels().find(isVisionCapable))
 
   const currentLocalModelValue = () => {
     const current = local.model.current()
@@ -455,7 +589,12 @@ export default function Robotics() {
 
   const initialModel = (() => {
     try {
-      return localStorage.getItem(ROBOT_MODEL_STORAGE) ?? currentLocalModelValue()
+      const stored = localStorage.getItem(ROBOT_MODEL_STORAGE)
+      if (stored) return stored
+      // Default: first vision-capable model in the user's enabled providers.
+      const vision = allRobotModels().find(isVisionCapable)
+      if (vision) return `${vision.provider.id}/${vision.id}`
+      return currentLocalModelValue()
     } catch {
       return currentLocalModelValue()
     }
@@ -483,8 +622,23 @@ export default function Robotics() {
     return { providerID, modelID }
   }
   const modelLabel = createMemo(() => {
-    const m = visibleRobotModels().find((x) => `${x.provider.id}/${x.id}` === selectedModel())
+    const m = allRobotModels().find((x) => `${x.provider.id}/${x.id}` === selectedModel())
     return m ? `${m.provider.name} / ${m.name}` : "heuristic (no model)"
+  })
+
+  createEffect(() => {
+    const selected = selectedModel()
+    if (!selected) return
+    const model = allRobotModels().find((entry) => `${entry.provider.id}/${entry.id}` === selected)
+    if (!model) {
+      const fallback = defaultVisionModel()
+      if (fallback) setSelectedModel(`${fallback.provider.id}/${fallback.id}`)
+      return
+    }
+    if (!showAllModels() && !isVisionCapable(model)) {
+      const fallback = defaultVisionModel()
+      if (fallback) setSelectedModel(`${fallback.provider.id}/${fallback.id}`)
+    }
   })
 
   const [store, setStore] = createStore({
@@ -520,6 +674,12 @@ export default function Robotics() {
     }
   }
 
+  const capturePerception = () => {
+    const canvas = viewportRef?.querySelector('canvas[data-robot-scene="true"]') as HTMLCanvasElement | null
+    if (!canvas) return undefined
+    return analyzeTargetPixels(canvas)
+  }
+
   const pushLog = (line: string) => {
     const stamped = `${new Date().toLocaleTimeString([], { hour12: false })}  ${line}`
     setStore("logs", (items) => [stamped, ...items].slice(0, 7))
@@ -536,19 +696,18 @@ export default function Robotics() {
     })
   }
 
-  const sceneDescription = (frame: VisionFrame) => {
-    const dx = store.target.x - store.pose.x
-    const dy = store.target.y - store.pose.y
-    const dz = store.target.z - store.pose.z
+  const sceneDescription = (observation: PixelObservation) => {
     return [
-      `target_visible=${frame.confidence > 0.4}`,
-      `target_screen_offset_x_pct=${frame.offsetX.toFixed(1)} (negative=left, positive=right)`,
-      `target_screen_offset_y_pct=${frame.offsetY.toFixed(1)} (negative=above, positive=below)`,
-      `distance_gripper_to_target=${frame.depth.toFixed(2)}`,
-      `pose: x=${store.pose.x.toFixed(1)}, y=${store.pose.y.toFixed(1)}, z=${store.pose.z.toFixed(1)}, yaw=${store.pose.yaw.toFixed(1)}, grip=${store.pose.grip.toFixed(1)}`,
-      `target_xyz=${store.target.x.toFixed(1)},${store.target.y.toFixed(1)},${store.target.z.toFixed(1)}`,
-      `vector_gripper_to_target: dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, dz=${dz.toFixed(1)}`,
-      `close_gripper_when_distance_under_5=${frame.depth < 5}`,
+      `observation_source=pixel_detector_plus_joint_encoders`,
+      `target_visible=${observation.detected}`,
+      `target_screen_offset_x_pct=${observation.offsetX.toFixed(1)} (negative=left, positive=right)`,
+      `target_screen_offset_y_pct=${observation.offsetY.toFixed(1)} (negative=above, positive=below)`,
+      `target_area_pct=${observation.areaPct.toFixed(3)}`,
+      `target_apparent_diameter_px=${observation.apparentDiameterPx.toFixed(1)}`,
+      `estimated_depth_m=${observation.estimatedDepth.toFixed(3)}`,
+      `detector_confidence=${observation.confidence.toFixed(2)}`,
+      `joint_encoders_deg: base=${store.pose.yaw.toFixed(1)}, shoulder=${(store.pose.z * 0.5).toFixed(1)}, elbow=${(-store.pose.y * 0.5).toFixed(1)}, wrist=${(store.pose.x * 0.25).toFixed(1)}`,
+      `gripper_state=${store.pose.grip > 50 ? "closed" : "open"} gripper_open_pct=${store.pose.grip.toFixed(1)}`,
     ].join("\n")
   }
 
@@ -575,13 +734,15 @@ export default function Robotics() {
     }
     try {
       const fetcher = platform.fetch ?? fetch
+      const fpv = captureFrame()
+      const observation = capturePerception()
       const res = await fetcher(`${globalSDK.url}/robot/step`, {
         method: "POST",
         headers: headers(true),
         body: JSON.stringify({
           goal: "Reach the target and grasp it.",
-          fpv: captureFrame(),
-          sceneDescription: sceneDescription(frame),
+          fpv,
+          sceneDescription: observation ? sceneDescription(observation) : undefined,
           joints: {
             base: store.pose.yaw,
             shoulder: store.pose.z * 0.5,
@@ -849,7 +1010,17 @@ export default function Robotics() {
                 <Icon name="window-cursor" size="small" class="text-icon-weak" />
               </div>
               <div class="mb-3 flex flex-col gap-1.5">
-                <label class="text-11-regular text-text-weak">Controller model</label>
+                <div class="flex items-center justify-between">
+                  <label class="text-11-regular text-text-weak">Controller model</label>
+                  <label class="flex items-center gap-1.5 text-11-regular text-text-weak cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showAllModels()}
+                      onChange={(e) => setShowAllModels(e.currentTarget.checked)}
+                    />
+                    <span>show text-only</span>
+                  </label>
+                </div>
                 <select
                   value={selectedModel()}
                   onChange={(e) => setSelectedModel(e.currentTarget.value)}
@@ -858,11 +1029,14 @@ export default function Robotics() {
                 >
                   <option value="">Heuristic (no model)</option>
                   <For each={visibleRobotModels()}>
-                    {(m) => (
-                      <option value={`${m.provider.id}/${m.id}`}>
-                        {m.provider.name} / {m.name}
-                      </option>
-                    )}
+                    {(m) => {
+                      const tag = isVisionCapable(m) ? "[vision]" : "[text]"
+                      return (
+                        <option value={`${m.provider.id}/${m.id}`}>
+                          {tag} {m.provider.name} / {m.name}
+                        </option>
+                      )
+                    }}
                   </For>
                 </select>
                 <span class="text-11-regular text-text-weak">{modelLabel()}</span>
@@ -870,7 +1044,7 @@ export default function Robotics() {
               <div class="flex flex-col gap-2 text-12-regular text-text-base">
                 <LoopRow label="Controller" value={store.busy ? "waiting for model" : "image-capable AGI policy"} />
                 <LoopRow label="Model path" value={store.modality === "local" ? "local fallback" : `ai/${store.modality}`} />
-                <LoopRow label="Image input" value={store.supportsImage ? "canvas PNG + text observation" : "text observation"} />
+                <LoopRow label="Observation" value={store.modality === "vision" ? "FPV camera frame only (real-hardware parity)" : store.modality === "text" ? "pixel detector + joint encoders" : "local heuristic"} />
                 <LoopRow label="Action schema" value="dx, dy, dz, yaw, grip" />
                 <LoopRow
                   label="Image offset"
@@ -889,6 +1063,14 @@ export default function Robotics() {
               <Show when={store.transport === "hardware"}>
                 <p class="mt-3 text-12-regular text-text-warning-base">
                   Hardware bridge is reserved and disabled in this build.
+                </p>
+              </Show>
+              <Show when={store.modality === "text"}>
+                <p class="mt-3 text-11-regular text-text-warning-base">
+                  Text mode no longer uses simulator world-state. It feeds a detector-style report extracted from the
+                  actual FPV pixels plus joint encoder state, which is a realistic contract for a real robot with a
+                  classical vision front-end. Vision models still get the best end-to-end behavior because they see the
+                  raw frame directly.
                 </p>
               </Show>
             </section>
