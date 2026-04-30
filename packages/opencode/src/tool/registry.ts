@@ -69,6 +69,8 @@ import { AudioTool } from "./audio"
 import { TlsTool } from "./tls"
 import { JwtTool } from "./jwt"
 import { OtpTool } from "./otp"
+import { HumanizeTool } from "./humanize"
+import { TabulateTool } from "./tabulate"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -229,6 +231,8 @@ export const layer: Layer.Layer<
     const tlstool = yield* TlsTool
     const jwttool = yield* JwtTool
     const otptool = yield* OtpTool
+    const humanizetool = yield* HumanizeTool
+    const tabulatetool = yield* TabulateTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -375,6 +379,8 @@ export const layer: Layer.Layer<
           tls: Tool.init(tlstool),
           jwt: Tool.init(jwttool),
           otp: Tool.init(otptool),
+          humanize: Tool.init(humanizetool),
+          tabulate: Tool.init(tabulatetool),
         })
 
         return {
@@ -452,6 +458,8 @@ export const layer: Layer.Layer<
             tool.tls,
             tool.jwt,
             tool.otp,
+            tool.humanize,
+            tool.tabulate,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

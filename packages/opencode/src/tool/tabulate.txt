@@ -1,0 +1,24 @@
+Format tabular data into ASCII / markdown / plain TSV tables.
+
+Use to turn an array of objects (or rows) into a readable table for chat output, log files, or markdown reports. Pure local computation, no I/O.
+
+Actions:
+- `format` - Render `rows` (array of objects or array of arrays) using the chosen `format`.
+- `transpose` - Swap rows and columns. Useful when you have wide data and want a "label: value" view.
+- `parse_markdown` - Parse a markdown / GitHub-flavored table back into `{ columns, rows }` JSON.
+- `summary` - Produce per-column summary stats (count, distinct, numeric mean/min/max).
+
+Common parameters:
+- `rows` - Array of row objects (`[{a:1,b:2},...]`) or array of arrays (`[[1,2],[3,4]]`). For object rows, keys become columns by default.
+- `columns` - Optional explicit column order/selection. If omitted, derived from first row's keys.
+- `format` - "ascii" (box-drawing default), "markdown", "tsv", "csv". Markdown emits GitHub-flavored alignment row.
+- `align` - "left" (default), "right", "center", or per-column array `["left","right",...]`.
+- `max_col_width` - Truncate long cell values to this many characters and append `…`.
+- `headers` - Set to false to suppress the header row in output.
+- `null_as` - String to display for null/undefined cells. Default empty.
+- `text` - Markdown table source for parse_markdown.
+
+Notes:
+- Numeric-looking columns auto-right-align in ascii/markdown unless `align` is set explicitly.
+- ascii output uses ASCII-only borders so it survives copy-paste into terminals without box drawing fonts.
+- For very large tables, prefer `tsv` and pipe through your own viewer rather than ascii; ascii buffers everything.

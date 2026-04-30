@@ -1,0 +1,30 @@
+Humanize / parse numeric values, byte sizes, durations, and time deltas.
+
+Use to convert raw machine values into reader-friendly forms (and back). Pure local computation, no I/O.
+
+Actions:
+- `bytes_format` - Format `n` (a byte count) as a human-readable size. `style="iec"` (default) gives binary KiB/MiB/GiB; `style="si"` gives decimal kB/MB/GB.
+- `bytes_parse` - Parse a string like "1.5 GB" / "1.5GiB" / "1024" back into an integer byte count.
+- `duration_format` - Format milliseconds as a compact string like "1d 1h 23m 4s" or "1.2 ms".
+- `duration_parse` - Parse "1d 1h", "90s", "1500ms", "1.5h" → milliseconds.
+- `number_format` - Format with thousands grouping using a BCP-47 locale (default "en-US"). Optional `decimals` and `compact` (1234567 → "1.2M").
+- `number_parse` - Strip thousands separators / units suffix and return a numeric value.
+- `ordinal` - Convert an integer to "1st", "22nd", etc. English only.
+- `pluralize` - Return `count noun` with the right plural form. Pass `plural` for irregulars; otherwise an "s" is appended when count != 1.
+- `relative_time` - Express a delta in ms (positive = past) as "2 hours ago", "in 30 seconds", etc.
+- `slug` - Slugify text: lowercase, strip diacritics, replace runs of non-alphanumeric with a single dash. Length-bounded.
+
+Common parameters:
+- `n` - Numeric input for bytes_format / duration_format / number_format / ordinal / relative_time.
+- `value` - String input for bytes_parse / duration_parse / number_parse.
+- `style` - "iec" (1024-based, default for bytes) or "si" (1000-based).
+- `decimals` - Number of fraction digits for bytes_format / number_format. Default depends on action.
+- `compact` - For number_format: produce "1.2K" / "3.4M" instead of full digits.
+- `locale` - BCP-47 tag for number_format (default "en-US").
+- `text` - Input for slug action.
+- `noun`, `plural`, `count` - For pluralize.
+
+Notes:
+- `bytes_parse` accepts both decimal (kB) and binary (KiB) units; "1K" defaults to binary 1024 to match common shell tools.
+- `duration_parse` accepts spaces between groups, but each group must use a recognized unit suffix (ms, s, m, h, d, w).
+- Negative inputs are preserved with a leading minus sign in the formatted output.
