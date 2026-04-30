@@ -97,6 +97,7 @@ const AVAILABLE_TOOLS = [
   "powershell",
   "ical",
   "graphql",
+  "dotenv",
 ]
 
 const AgentCreateCommand = cmd({

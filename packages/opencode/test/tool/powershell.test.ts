@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Agent } from "../../src/agent/agent"
@@ -35,6 +35,45 @@ async function detectExecutable(): Promise<string | null> {
 }
 
 describe("tool.powershell", () => {
+  it.live("asks powershell permission before resolving an executable", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const calls: Array<Parameters<Tool.Context["ask"]>[0]> = []
+        const toolInfo = yield* PowerShellTool
+        const tool = yield* toolInfo.init()
+        const command = "Write-Output 'permission-probe'"
+        const exit = yield* Effect.exit(
+          tool.execute(
+            {
+              command,
+              description: "permission check",
+              workdir: dir,
+            },
+            {
+              ...baseCtx,
+              ask: (input) =>
+                Effect.sync(() => {
+                  calls.push(input)
+                  throw new Error("permission probe")
+                }),
+            },
+          ),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.permission).toBe("powershell")
+        expect(calls[0]!.patterns).toEqual([command])
+        expect(calls[0]!.always).toEqual([command])
+        expect(calls[0]!.metadata).toMatchObject({
+          description: "permission check",
+          workdir: dir,
+          preferred: "auto",
+        })
+      }),
+    ),
+  )
+
   it.live("runs a trivial Write-Output command", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Agent } from "../../src/agent/agent"
@@ -82,7 +82,7 @@ beforeAll(() => {
     port: 0,
     async fetch(req) {
       const url = new URL(req.url)
-      // Echo route — returns query/variables/operationName in JSON
+      // Echo route - returns query/variables/operationName in JSON
       if (url.pathname === "/echo") {
         if (req.method === "GET") {
           return new Response(
@@ -104,7 +104,7 @@ beforeAll(() => {
           headers: { "Content-Type": "application/json" },
         })
       }
-      // Errors route — returns a typical GraphQL error envelope with HTTP 200
+      // Errors route - returns a typical GraphQL error envelope with HTTP 200
       if (url.pathname === "/errors") {
         return new Response(
           JSON.stringify({
@@ -117,7 +117,7 @@ beforeAll(() => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         )
       }
-      // Auth-required route — checks Authorization header
+      // Auth-required route - checks Authorization header
       if (url.pathname === "/auth") {
         const auth = req.headers.get("authorization") ?? ""
         if (auth !== "Bearer t0ken") {
@@ -131,7 +131,7 @@ beforeAll(() => {
           headers: { "Content-Type": "application/json" },
         })
       }
-      // Flaky route — 503 first 2 attempts, then 200
+      // Flaky route - 503 first 2 attempts, then 200
       if (url.pathname === "/flaky") {
         attemptCounter++
         if (attemptCounter < 3) {
@@ -142,7 +142,7 @@ beforeAll(() => {
           headers: { "Content-Type": "application/json" },
         })
       }
-      // Garbage route — non-JSON 200
+      // Garbage route - non-JSON 200
       if (url.pathname === "/garbage") {
         return new Response("<!DOCTYPE html>not json", {
           status: 200,
@@ -160,6 +160,38 @@ afterAll(() => {
 })
 
 describe("tool.graphql (integration)", () => {
+  it.live("asks graphql permission before sending a request", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const calls: Array<Parameters<Tool.Context["ask"]>[0]> = []
+        const toolInfo = yield* GraphQLTool
+        const tool = yield* toolInfo.init()
+        const exit = yield* Effect.exit(
+          tool.execute(
+            {
+              url: `${baseUrl}/echo`,
+              query: "{ ping }",
+            },
+            {
+              ...baseCtx,
+              ask: (input) =>
+                Effect.sync(() => {
+                  calls.push(input)
+                  throw new Error("permission probe")
+                }),
+            },
+          ),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(calls).toHaveLength(1)
+        expect(calls[0]!.permission).toBe("graphql")
+        expect(calls[0]!.patterns).toEqual([`POST ${baseUrl}/echo`])
+        expect(calls[0]!.always).toEqual([`POST ${baseUrl}/echo`])
+      }),
+    ),
+  )
+
   it.live("POST echoes back query and variables", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

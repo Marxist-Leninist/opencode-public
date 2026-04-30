@@ -1,0 +1,38 @@
+Parse and serialize .env files. Complement to the `env` tool, which reads process.env at runtime.
+
+ACTIONS
+- parse: turn .env text or a file path into a JSON object of key/value strings.
+- info: report key count, unique-key count, duplicates, comment/blank/malformed-line counts - without dumping values.
+- stringify: take a `{ key: value }` object and produce .env text in either dotenv or shell quoting style.
+
+PARSING
+- Pass either `text` (raw .env content) or `file` (path to .env). Exactly one.
+- Accepts:
+  - `KEY=value` (unquoted, trimmed, stops at unescaped `#` for inline comments).
+  - `KEY="value with $escapes \\n"` (double-quoted; supports `\n \r \t \v \f \b \\ \" \' \$ \0`).
+  - `KEY='literal value'` (single-quoted; no escape interpretation).
+  - `KEY=\`backtick\`` (treated as literal).
+  - `export KEY=value` and `set -gx KEY=value` style - the prefix is stripped.
+  - Multi-line quoted values (spans newlines until the closing quote).
+  - `# comments` - picked up as the comment for the next key.
+- `expand: true` performs `$VAR` and `${VAR}` (with optional `${VAR:-default}`) substitution against earlier keys in the same file. Single-quoted values are never expanded. Default false (safe).
+- `redact_secrets: true` rewrites values whose key matches /(?:^|_)(KEY|SECRET|TOKEN|PASSWORD|PASSWD|AUTH|PRIVATE|API_KEY|DSN|SESSION|COOKIE)(_|$)/i to `***` in the JSON output. Metadata still reports the real counts.
+
+STRINGIFY
+- Pass `values: { key: stringOrNumberOrBoolean | null }`.
+- `mode: "dotenv"` (default) - only quotes values that need it (whitespace, quotes, backslashes, leading `#`, empty string). Newlines/tabs become escape sequences inside the double-quoted form.
+- `mode: "shell"` - single-quotes every value POSIX-style so the file is safe to `source` from a POSIX shell.
+- `comments: { key: "..." }` puts a `# comment` line above each matching key.
+- `preserve_unset: true` (default) emits `KEY=` for null values; set false to skip them entirely.
+
+EXAMPLES
+- Parse a project's .env, redacting secrets:
+    action=parse, file=".env.local", redact_secrets=true
+
+- Quick stats on a giant config:
+    action=info, file="docker.env"
+
+- Build an .env from an object with comments:
+    action=stringify
+    values={ DATABASE_URL: "postgres://...", LOG_LEVEL: "info" }
+    comments={ DATABASE_URL: "Primary read-write" }

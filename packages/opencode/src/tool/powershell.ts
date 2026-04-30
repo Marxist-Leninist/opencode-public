@@ -25,7 +25,7 @@ const PRELUDE = [
 export const Parameters = Schema.Struct({
   command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_COMMAND_LENGTH)).annotate({
     description:
-      "PowerShell script body. Multi-line input is fine — the whole block runs as one script through stdin. Prefer Verb-Noun cmdlets over external exes when both are available.",
+      "PowerShell script body. Multi-line input is fine - the whole block runs as one script through stdin. Prefer Verb-Noun cmdlets over external exes when both are available.",
   }),
   description: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160)).annotate({
     description: "5-15 word summary of what the script does. Surfaced in the chat UI and logs.",
@@ -43,7 +43,7 @@ export const Parameters = Schema.Struct({
   }),
   prefer: Schema.optional(Schema.Literals(PREFERRED_VALUES)).annotate({
     description:
-      "Which PowerShell executable to use: 'auto' (default — prefer pwsh, fall back to powershell.exe on Windows), 'pwsh' (PowerShell 7+; cross-platform), or 'powershell' (Windows PowerShell 5.1; Windows only).",
+      "Which PowerShell executable to use: 'auto' (default - prefer pwsh, fall back to powershell.exe on Windows), 'pwsh' (PowerShell 7+; cross-platform), or 'powershell' (Windows PowerShell 5.1; Windows only).",
   }),
   max_output_bytes: Schema.optional(
     Schema.Number.check(Schema.isInt())
@@ -186,7 +186,7 @@ function runScript(
       const haveBytes = isStdout ? stdoutBytes : stderrBytes
       const truncated = isStdout ? stdoutTruncated : stderrTruncated
       if (truncated) {
-        // Already over the cap — still count to report total, but stop buffering.
+        // Already over the cap - still count to report total, but stop buffering.
         if (isStdout) stdoutBytes += chunk.length
         else stderrBytes += chunk.length
         return
@@ -215,7 +215,7 @@ function runScript(
     try {
       child.stdin?.end(fullScript, "utf8")
     } catch {
-      /* ignore — child may have died already */
+      /* ignore - child may have died already */
     }
 
     const onAbortKill = () => {
@@ -270,7 +270,7 @@ function runScript(
 function annotate(label: string, value: string, truncated: boolean): string {
   const trimmed = value.replace(/\s+$/g, "")
   if (!trimmed && !truncated) return ""
-  const header = truncated ? `--- ${label} (TAIL — head dropped due to byte cap) ---` : `--- ${label} ---`
+  const header = truncated ? `--- ${label} (TAIL - head dropped due to byte cap) ---` : `--- ${label} ---`
   return `${header}\n${trimmed}\n`
 }
 
@@ -292,6 +292,18 @@ export const PowerShellTool = Tool.define(
               ? params.workdir
               : path.resolve(Instance.directory, params.workdir)
             : Instance.directory
+
+          yield* ctx.ask({
+            permission: "powershell",
+            patterns: [params.command],
+            always: [params.command],
+            metadata: {
+              description: params.description,
+              workdir,
+              preferred,
+              timeout_ms: timeoutMs,
+            },
+          })
 
           yield* ctx.metadata({
             title: `powershell: ${params.description}`,

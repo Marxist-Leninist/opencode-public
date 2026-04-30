@@ -17,7 +17,7 @@ export const Parameters = Schema.Struct({
   }),
   query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(524_288)).annotate({
     description:
-      "GraphQL document. Can be a query, mutation, or subscription text. Up to 512 KB. Subscriptions are not streamed — use a websocket client for that.",
+      "GraphQL document. Can be a query, mutation, or subscription text. Up to 512 KB. Subscriptions are not streamed - use a websocket client for that.",
   }),
   variables: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)).annotate({
     description: "Optional variables map ({ name: value }). Sent as JSON in the request body.",
@@ -101,6 +101,14 @@ type Metadata = {
 const done = (result: Tool.ExecuteResult<Metadata>) => result
 
 const REDACT_HEADERS = new Set(["authorization", "cookie", "set-cookie", "x-api-key", "x-api-token"])
+
+function validateEndpoint(url: string): URL {
+  const endpoint = new URL(url)
+  if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
+    throw new Error("graphql: url must start with http:// or https://")
+  }
+  return endpoint
+}
 
 function redactHeaders(headers: Record<string, string>, on: boolean): Record<string, string> {
   if (!on) return { ...headers }
@@ -213,6 +221,7 @@ export const GraphQLTool = Tool.define(
           const retryDelay = params.retry_delay_ms ?? DEFAULT_RETRY_DELAY_MS
           const failOnGraphQL = params.fail_on_graphql_errors ?? true
           const redact = params.redact_headers ?? true
+          const endpoint = validateEndpoint(params.url)
 
           // Build merged headers without mutating input
           const headers: Record<string, string> = {
@@ -238,8 +247,19 @@ export const GraphQLTool = Tool.define(
             init = { method: "POST", headers, body }
           }
 
+          yield* ctx.ask({
+            permission: "graphql",
+            patterns: [`${method} ${params.url}`],
+            always: [`${method} ${params.url}`],
+            metadata: {
+              url: params.url,
+              method,
+              operation_name: params.operation_name,
+            },
+          })
+
           yield* ctx.metadata({
-            title: `graphql ${method} ${new URL(params.url).host}`,
+            title: `graphql ${method} ${endpoint.host}`,
             metadata: {
               url: params.url,
               method,
@@ -308,7 +328,7 @@ export const GraphQLTool = Tool.define(
           // Build human-readable output
           const lines: string[] = []
           lines.push(
-            `${method} ${params.url}${params.operation_name ? ` (${params.operation_name})` : ""} → ${
+            `${method} ${params.url}${params.operation_name ? ` (${params.operation_name})` : ""} -> ${
               result.status ?? "ERR"
             } in ${duration_ms}ms (${attempts} attempt${attempts === 1 ? "" : "s"}, ${result.bytes} bytes${
               result.truncated ? "; truncated" : ""
@@ -333,7 +353,7 @@ export const GraphQLTool = Tool.define(
           const output = lines.join("\n")
 
           let title: string
-          if (!transportOk) title = `graphql transport error → ${result.status ?? "no response"}`
+          if (!transportOk) title = `graphql transport error -> ${result.status ?? "no response"}`
           else if (parseError) title = `graphql parse error: ${params.url}`
           else if (hasErrors) title = `graphql ${errors.length} error${errors.length === 1 ? "" : "s"}: ${params.url}`
           else title = `graphql ok (${duration_ms}ms): ${params.url}${params.operation_name ? ` (${params.operation_name})` : ""}`

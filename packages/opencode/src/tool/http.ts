@@ -47,7 +47,7 @@ export const Parameters = Schema.Struct({
   }),
   auth: Schema.optional(Schema.Union([AuthBearer, AuthBasic])).annotate({
     description:
-      "Optional auth: { type:'bearer', token } adds Authorization: Bearer …; { type:'basic', username, password } adds basic auth.",
+      "Optional auth: { type:'bearer', token } adds Authorization: Bearer ...; { type:'basic', username, password } adds basic auth.",
   }),
   timeout_ms: Schema.optional(
     Schema.Number.check(Schema.isInt())
@@ -305,6 +305,18 @@ export const HttpTool = Tool.define(
             ? buildBody(params.body, bodyType, reqHeaders)
             : { body: null as BodyInit | null, appliedType: bodyType }
 
+          yield* ctx.ask({
+            permission: "webfetch",
+            patterns: [url],
+            always: ["*"],
+            metadata: {
+              source: "http",
+              method,
+              url,
+              timeout_ms: timeoutMs,
+            },
+          })
+
           // ctx.abort signals user cancellation; merge with our timeout.
           const localCtl = new AbortController()
           const timeoutHandle = setTimeout(() => localCtl.abort(new Error("http: timeout")), timeoutMs)
@@ -359,7 +371,7 @@ export const HttpTool = Tool.define(
           if (!statusAccepted(response.status, acceptStatus)) {
             const preview = output.slice(0, 512)
             throw new Error(
-              `http: ${method} ${url} → ${response.status} ${response.statusText} (rejected; accept_status=${JSON.stringify(acceptStatus)}). Body preview: ${preview}`,
+              `http: ${method} ${url} -> ${response.status} ${response.statusText} (rejected; accept_status=${JSON.stringify(acceptStatus)}). Body preview: ${preview}`,
             )
           }
 
@@ -377,10 +389,10 @@ export const HttpTool = Tool.define(
 function shortUrl(url: string): string {
   try {
     const u = new URL(url)
-    const path = u.pathname.length > 40 ? u.pathname.slice(0, 37) + "…" : u.pathname
+    const path = u.pathname.length > 40 ? u.pathname.slice(0, 37) + "..." : u.pathname
     return `${u.host}${path}`
   } catch {
-    return url.length > 60 ? url.slice(0, 57) + "…" : url
+    return url.length > 60 ? url.slice(0, 57) + "..." : url
   }
 }
 

@@ -84,6 +84,7 @@ import { UlidTool } from "./ulid"
 import { PowerShellTool } from "./powershell"
 import { ICalTool } from "./ical"
 import { GraphQLTool } from "./graphql"
+import { DotenvTool } from "./dotenv"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -259,6 +260,7 @@ export const layer: Layer.Layer<
     const powershelltool = yield* PowerShellTool
     const icaltool = yield* ICalTool
     const graphqltool = yield* GraphQLTool
+    const dotenvtool = yield* DotenvTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -420,6 +422,7 @@ export const layer: Layer.Layer<
           powershell: Tool.init(powershelltool),
           ical: Tool.init(icaltool),
           graphql: Tool.init(graphqltool),
+          dotenv: Tool.init(dotenvtool),
         })
 
         return {
@@ -512,6 +515,7 @@ export const layer: Layer.Layer<
             tool.powershell,
             tool.ical,
             tool.graphql,
+            tool.dotenv,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
