@@ -166,7 +166,11 @@ export function DialogChatSearch(props: { initialDirectory?: string }) {
   })
 
   createEffect(() => {
-    if (selectedModelTouched()) return
+    const list = visibleModels()
+    const current = selectedModel()
+    const currentExists = list.some((model) => `${model.provider.id}/${model.id}` === current)
+    if (selectedModelTouched() && currentExists) return
+
     const model = preferredModel()
     if (model) setSelectedModel(`${model.provider.id}/${model.id}`)
   })

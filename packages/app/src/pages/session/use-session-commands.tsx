@@ -268,6 +268,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
+  const addMcp = () => {
+    void import("@/components/dialog-add-mcp").then((x) => {
+      dialog.show(() => <x.DialogAddMcp />)
+    })
+  }
+
   const toggleAutoAccept = () => {
     const sessionID = params.id
     if (sessionID) permission.toggleAutoAccept(sessionID, sdk.directory)
@@ -538,6 +544,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       keybind: "mod+;",
       slash: "mcp",
       onSelect: chooseMcp,
+    }),
+    mcpCommand({
+      id: "mcp.add",
+      title: "Add MCP server",
+      description: "Add a new MCP server (local stdio or remote HTTP/SSE)",
+      slash: "mcp-add",
+      onSelect: addMcp,
     }),
   ]
 

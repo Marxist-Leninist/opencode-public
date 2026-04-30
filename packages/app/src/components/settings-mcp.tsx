@@ -9,6 +9,7 @@ import { createMemo, type Component, For, Show, type JSX } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { parseMcpCommand, parseMcpRemoteUrl, parseMcpTimeout } from "./mcp-config-utils"
 // NOTE: Settings is a global dialog and is rendered outside any per-instance
 // SyncProvider, so we cannot use `useSync()` here. Live connect/disconnect
 // status is shown in the workspace status popover instead — this tab manages
@@ -61,11 +62,7 @@ function searchConfig(config: Config) {
 }
 
 function parseTimeout(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error("Timeout must be a positive whole number.")
-  return parsed
+  return parseMcpTimeout(value)
 }
 
 function parseLimit(value: string) {
@@ -77,54 +74,11 @@ function parseLimit(value: string) {
 }
 
 function validateRemoteURL(value: string) {
-  const trimmed = value.trim()
-  const url = new URL(trimmed)
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Remote MCP URL must start with http:// or https://.")
-  }
-  return trimmed
+  return parseMcpRemoteUrl(value)
 }
 
 function parseCommand(value: string) {
-  const args: string[] = []
-  let current = ""
-  let quote: '"' | "'" | undefined
-  let escaping = false
-
-  for (const char of value.trim()) {
-    if (escaping) {
-      current += char
-      escaping = false
-      continue
-    }
-    if (quote === '"' && char === "\\") {
-      escaping = true
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = undefined
-      else current += char
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (/\s/.test(char)) {
-      if (current) {
-        args.push(current)
-        current = ""
-      }
-      continue
-    }
-    current += char
-  }
-
-  if (escaping) current += "\\"
-  if (quote) throw new Error("Command has an unmatched quote.")
-  if (current) args.push(current)
-  if (args.length === 0) throw new Error("Local MCP command is required.")
-  return args
+  return parseMcpCommand(value)
 }
 
 function parseEnvironment(value: string) {
