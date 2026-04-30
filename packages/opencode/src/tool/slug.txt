@@ -1,0 +1,30 @@
+Convert text to URL-safe slugs and back. Useful when generating filenames, URL paths, identifiers, or tags from human-friendly titles.
+
+ACTIONS
+- slugify: turn arbitrary text into a slug. Lowercases, transliterates Latin diacritics, collapses non-alphanumerics into a separator, trims, optionally truncates.
+- unslugify: best-effort reverse — replaces separators with spaces and title-cases the result. Lossy (cannot recover original casing or punctuation).
+- breadcrumb: split a path-like string ("Foo > Bar > Baz" or "a/b/c") into slugified segments and join with `/`. Good for nested URL paths.
+- info: return slug stats (length, segment count, replaced char count) without changing it.
+
+OPTIONS
+- separator: default "-". Set to "_" for snake-case slugs, or "" to concatenate words with no separator.
+- max_length: optional truncation, taking care not to break in the middle of a separator.
+- preserve_case: keep original case instead of lowercasing. Default false.
+- allow_dot: allow `.` to pass through (useful for filenames). Default false.
+- allow_slash: allow `/` to pass through (used by breadcrumb mode automatically). Default false for slugify.
+- transliterate: convert non-ASCII letters to their closest ASCII equivalents using the bundled Latin map. Default true. When false, non-ASCII chars are dropped.
+- emoji: replace common emoji with their CLDR-style short names ("rocket" for 🚀). Default false.
+
+EXAMPLES
+- "Hello, World!" -> "hello-world"
+- "Café déjà vu"  -> "cafe-deja-vu"
+- "Foo > Bar"     -> "foo/bar" (breadcrumb)
+- "Hello 🚀"      -> "hello-rocket" (with emoji=true)
+- "Snake_case_path" + separator="_" + preserve_case=true -> "Snake_case_path"
+
+CHARACTER POLICY
+- ASCII letters and digits are kept.
+- Whitespace, punctuation, and quotes are replaced with the separator.
+- Sequences of separators are collapsed to a single one and trimmed from the ends.
+- Diacritics are transliterated when transliterate=true (e.g. ß → ss, æ → ae, ñ → n).
+- Latin extended-A/B characters are mapped pragmatically; non-Latin scripts (CJK, Arabic, Cyrillic, etc.) are dropped unless you keep transliterate=false in which case all non-ASCII is dropped uniformly.

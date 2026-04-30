@@ -85,6 +85,9 @@ import { PowerShellTool } from "./powershell"
 import { ICalTool } from "./ical"
 import { GraphQLTool } from "./graphql"
 import { DotenvTool } from "./dotenv"
+import { BignumTool } from "./bignum"
+import { SlugTool } from "./slug"
+import { PkceTool } from "./pkce"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -261,6 +264,9 @@ export const layer: Layer.Layer<
     const icaltool = yield* ICalTool
     const graphqltool = yield* GraphQLTool
     const dotenvtool = yield* DotenvTool
+    const bignumtool = yield* BignumTool
+    const slugtool = yield* SlugTool
+    const pkcetool = yield* PkceTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -423,6 +429,9 @@ export const layer: Layer.Layer<
           ical: Tool.init(icaltool),
           graphql: Tool.init(graphqltool),
           dotenv: Tool.init(dotenvtool),
+          bignum: Tool.init(bignumtool),
+          slug: Tool.init(slugtool),
+          pkce: Tool.init(pkcetool),
         })
 
         return {
@@ -516,6 +525,9 @@ export const layer: Layer.Layer<
             tool.ical,
             tool.graphql,
             tool.dotenv,
+            tool.bignum,
+            tool.slug,
+            tool.pkce,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

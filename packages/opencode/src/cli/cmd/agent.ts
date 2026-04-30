@@ -98,6 +98,9 @@ const AVAILABLE_TOOLS = [
   "ical",
   "graphql",
   "dotenv",
+  "bignum",
+  "slug",
+  "pkce",
 ]
 
 const AgentCreateCommand = cmd({

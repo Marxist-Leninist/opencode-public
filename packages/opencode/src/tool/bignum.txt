@@ -1,0 +1,31 @@
+Arbitrary-precision integer arithmetic and number theory using native BigInt. Complement to `math` (which is Number-only) and `primes` (which is small-int only).
+
+ACTIONS
+- add | sub | mul | div | mod | pow: binary integer arithmetic. div is integer (truncated) division. pow accepts any non-negative second arg up to 1024 (use modpow for larger exponents).
+- gcd | lcm: greatest common divisor / least common multiple of two integers.
+- modpow: compute (a ** b) mod m efficiently using square-and-multiply. b can be huge.
+- modinv: modular multiplicative inverse of a mod m. Errors when gcd(a, m) != 1.
+- factorial: n! for non-negative n. n <= 5000 (anything bigger is unlikely to be useful and would balloon the result).
+- isprime: Miller-Rabin probabilistic primality test. Deterministic for n < 3,317,044,064,679,887,385,961,981 using a known set of witnesses, otherwise uses 32 random witnesses (false positive rate < 2^-64).
+- nextprime | prevprime: smallest prime > a / largest prime < a (for a > 2). Uses isprime under the hood.
+- factor: trial-divide small primes then run Pollard rho for the rest. Returns sorted prime factors with multiplicities. Practical up to ~80-bit composites.
+- gcd_ext: extended Euclidean - returns g, x, y such that a*x + b*y = g.
+- bitlen: bit length of |a|.
+- to_base | from_base: stringify/parse with bases 2..36.
+
+INPUTS
+- a, b, m, n are decimal strings, hex (0x prefix), octal (0o prefix), or binary (0b prefix). Negative supported with leading "-".
+- to_base also accepts `base` 2..36.
+
+EXAMPLES
+- 2^256 - 1: action=sub, a="0x10000000000000000000000000000000000000000000000000000000000000000", b="1"
+- Modular exponent for crypto: action=modpow, a="65537", b="2147483647", m="0xfffffffffffffffffffffffffffffffeffffffffffffffff"
+- Confirm a prime: action=isprime, a="2305843009213693951"  // 2^61-1
+- Factor: action=factor, a="600851475143"
+- Big factorial: action=factorial, n=200
+- gcd: action=gcd, a="123456789", b="987654321"
+
+LIMITS
+- Each operand string up to 8192 characters.
+- modpow / pow exponents are BigInt; very large exponents are fine (square-and-multiply).
+- factor halts after ~10 seconds wall-clock or ~5,000 Pollard-rho iterations per factor and returns what it has so far.

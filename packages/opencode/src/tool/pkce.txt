@@ -1,0 +1,27 @@
+Generate and verify OAuth 2.0 PKCE (Proof Key for Code Exchange, RFC 7636) parameters. Useful when wiring a public client (mobile/desktop/SPA) through an OAuth authorization-code flow.
+
+ACTIONS
+- generate: produce a fresh `{ code_verifier, code_challenge, code_challenge_method }` plus `state` (random URL-safe nonce) ready to drop into an authorize URL.
+- challenge: derive `code_challenge` from a supplied `code_verifier` (use to test or to re-derive).
+- verify: confirm a stored `code_challenge` matches a presented `code_verifier` and method.
+- info: explain what was produced - lengths, entropy estimate, method used.
+
+OPTIONS
+- method: "S256" (default, recommended) - challenge = BASE64URL(SHA-256(verifier)). "plain" - challenge = verifier (legacy, only when the AS does not support S256).
+- length: verifier length, 43..128 (RFC 7636 Section 4.1). Default 64.
+- state_length: random `state` length in bytes before BASE64URL. Default 16 (about 22 chars).
+- nonce: when set, also generate a nonce string of the given length (for OIDC implicit/hybrid flows).
+- code_verifier: explicit verifier for `challenge` and `verify` actions. Must be 43..128 unreserved chars (A-Z a-z 0-9 - . _ ~).
+- code_challenge: stored challenge for `verify` action.
+
+OUTPUT
+- generate: returns `code_verifier`, `code_challenge`, `code_challenge_method`, `state`, optional `nonce`.
+- challenge: returns the derived `code_challenge`.
+- verify: returns `match: true|false` and a short reason.
+- info: pretty-printed summary.
+
+EXAMPLES
+- generate with defaults: action=generate
+- explicit method/length: action=generate, method=S256, length=96
+- derive: action=challenge, code_verifier="dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+- verify: action=verify, code_verifier="...", code_challenge="...", method=S256
