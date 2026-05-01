@@ -1278,6 +1278,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return { info, parts }
     }, Effect.scoped)
 
+    const interruptActiveWait = Effect.fn("SessionPrompt.interruptActiveWait")(function* (sessionID: SessionID) {
+      const match = yield* sessions.findMessage(sessionID, (msg) =>
+        msg.parts.some(
+          (part) => part.type === "tool" && part.tool === "wait" && part.state.status === "running",
+        ),
+      )
+      if (Option.isNone(match)) return
+
+      yield* elog.info("interrupting active wait for new user input", {
+        sessionID,
+        messageID: match.value.info.id,
+      })
+      yield* state.cancel(sessionID)
+    })
+
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
         const session = yield* sessions.get(input.sessionID)
@@ -1295,6 +1310,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (input.noReply === true) return message
+        yield* interruptActiveWait(input.sessionID)
         return yield* loop({ sessionID: input.sessionID })
       },
     )

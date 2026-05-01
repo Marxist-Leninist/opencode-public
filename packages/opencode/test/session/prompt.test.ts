@@ -1735,6 +1735,72 @@ it.live(
   3_000,
 )
 
+it.live(
+  "new user input interrupts an active wait tool",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Wait interrupt",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.tool("wait", {
+          seconds: 30,
+          reason: "waiting for an external check",
+          poll_interval_ms: 100,
+        })
+        yield* llm.text("handled the newer input")
+
+        const first = yield* prompt
+          .prompt({
+            sessionID: session.id,
+            agent: "build",
+            parts: [{ type: "text", text: "wait for a while" }],
+          })
+          .pipe(Effect.forkChild)
+
+        let activeWait: MessageV2.ToolPart | undefined
+        for (let i = 0; i < 100; i++) {
+          const msgs = yield* sessions.messages({ sessionID: session.id })
+          activeWait = msgs
+            .flatMap((msg) => msg.parts)
+            .find(
+              (part): part is MessageV2.ToolPart =>
+                part.type === "tool" && part.tool === "wait" && part.state.status === "running",
+            )
+          if (activeWait) break
+          yield* Effect.sleep(20)
+        }
+        expect(activeWait?.state.status).toBe("running")
+
+        const result = yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          parts: [{ type: "text", text: "stop waiting and answer this" }],
+        })
+
+        expect(result.info.role).toBe("assistant")
+        expect(result.parts.some((part) => part.type === "text" && part.text.includes("handled the newer input"))).toBe(
+          true,
+        )
+
+        const firstExit = yield* Fiber.await(first)
+        expect(Exit.isSuccess(firstExit)).toBe(true)
+
+        const msgs = yield* sessions.messages({ sessionID: session.id })
+        const waitPart = msgs
+          .flatMap((msg) => msg.parts)
+          .find((part): part is MessageV2.ToolPart => part.type === "tool" && part.tool === "wait")
+        expect(waitPart?.state.status).not.toBe("running")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
+)
+
 // Agent variant
 
 it.live("applies agent variant only when using agent model", () =>
