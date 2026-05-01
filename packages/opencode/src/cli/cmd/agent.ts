@@ -104,6 +104,8 @@ const AVAILABLE_TOOLS = [
   "country",
   "jsonpath",
   "xpath",
+  "kv",
+  "lockfile",
 ]
 
 const AgentCreateCommand = cmd({

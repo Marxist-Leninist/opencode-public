@@ -1,0 +1,41 @@
+Parse a dependency lockfile to enumerate, look up, or summarise pinned versions across an ecosystem-agnostic schema.
+
+Use this when you need to know what packages a project depends on at exact pinned versions without running the package manager. Pairs well with `read`, `glob`, and `webfetch` (e.g. fetch advisory data and cross-reference). Read-only - never mutates the lockfile.
+
+Supported formats (auto-detected from filename, with explicit `kind` override):
+- `npm`         package-lock.json (lockfileVersion 1, 2, 3)
+- `yarn`        yarn.lock (Yarn classic v1)
+- `yarn-berry`  yarn.lock with __metadata header (Yarn 2/3/4)
+- `pnpm`        pnpm-lock.yaml
+- `bun`         bun.lock (text JSON, NOT bun.lockb binary)
+- `cargo`       Cargo.lock
+- `pip`         requirements.txt (pip freeze format)
+- `uv`          uv.lock
+- `gomod`       go.sum (matches a single hash line per pinned module)
+- `gemfile`     Gemfile.lock (Ruby Bundler)
+- `composer`    composer.lock (PHP)
+
+Parameters:
+- `action` (required): one of `detect`, `list`, `find`, `info`.
+- `path` (required): path to the lockfile. Absolute preferred; relative resolves from the project directory.
+- `kind` (optional): force a specific parser. Defaults to filename detection.
+- `query` (optional): for `find`. Package name (case-sensitive). Returns every entry whose name equals it.
+- `prefix` (optional): for `list`. Filter package names that start with this prefix.
+- `dev` (optional): for `list`. When the format distinguishes dev/optional/prod deps and this is `true`, include only dev deps. When `false`, include only prod. Default: include all.
+- `direct_only` (optional): for `list`. When `true`, return only top-level (direct) dependencies. Default false (include transitive).
+- `limit` (optional): for `list`. Max entries returned. Default 500, max 5000.
+- `format` (optional): output format for `list`/`find`. `lines` (default, `name@version` per line) or `json`.
+
+Behaviour:
+- `detect` reports the resolved `kind` (and `lockfile_version` if present), the byte size, and a small sample of detected package names.
+- `list` returns metadata.entries: array of { name, version, kind?, scope?, source? }. `kind` is `prod`/`dev`/`peer`/`optional` where the format exposes that distinction. `scope` is npm-style scope (e.g. `@types`). `source` is the resolved URL/registry/locator if present in the lockfile.
+- `find` searches for an exact-name match across all dependencies and returns every occurrence (a transitive dep can appear once but with different `kind` per declarer).
+- `info` returns counts: total_packages, direct, transitive, by_kind.
+- All actions cap output by truncating the `entries` array; the `total` field still reports the true count.
+- The tool refuses to read files larger than 64 MiB to keep memory bounded.
+
+Examples:
+- Detect a lockfile: `{ "action": "detect", "path": "package-lock.json" }`
+- Top-level prod deps only: `{ "action": "list", "path": "package-lock.json", "direct_only": true, "dev": false }`
+- Look up a transitive dep: `{ "action": "find", "path": "pnpm-lock.yaml", "query": "react" }`
+- Cargo summary: `{ "action": "info", "path": "Cargo.lock" }`

@@ -41,5 +41,7 @@ describe("debug tools smoke helpers", () => {
     expect(SG_NATIVE_TOOL_IDS).toContain("country")
     expect(SG_NATIVE_TOOL_IDS).toContain("jsonpath")
     expect(SG_NATIVE_TOOL_IDS).toContain("xpath")
+    expect(SG_NATIVE_TOOL_IDS).toContain("kv")
+    expect(SG_NATIVE_TOOL_IDS).toContain("lockfile")
   })
 })

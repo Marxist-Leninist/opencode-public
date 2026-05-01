@@ -91,6 +91,8 @@ import { PkceTool } from "./pkce"
 import { CountryTool } from "./country"
 import { JsonpathTool } from "./jsonpath"
 import { XpathTool } from "./xpath"
+import { KvTool } from "./kv"
+import { LockfileTool } from "./lockfile"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -273,6 +275,8 @@ export const layer: Layer.Layer<
     const countrytool = yield* CountryTool
     const jsonpathtool = yield* JsonpathTool
     const xpathtool = yield* XpathTool
+    const kvtool = yield* KvTool
+    const lockfiletool = yield* LockfileTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -441,6 +445,8 @@ export const layer: Layer.Layer<
           country: Tool.init(countrytool),
           jsonpath: Tool.init(jsonpathtool),
           xpath: Tool.init(xpathtool),
+          kv: Tool.init(kvtool),
+          lockfile: Tool.init(lockfiletool),
         })
 
         return {
@@ -540,6 +546,8 @@ export const layer: Layer.Layer<
             tool.country,
             tool.jsonpath,
             tool.xpath,
+            tool.kv,
+            tool.lockfile,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],

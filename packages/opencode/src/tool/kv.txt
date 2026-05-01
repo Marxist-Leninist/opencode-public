@@ -1,0 +1,39 @@
+Persistent key/value store for cross-session state. Survives chat restarts.
+
+Use this when you need state that outlives the current chat or process - counters, last-seen timestamps, run id, cached lookup results, sticky decisions, "have I done X for project Y yet?" flags. Pairs well with `cron`, `wait`, `task`, and the `sg-scheduler` MCP for stateful automations. NOT a secrets store - for secrets prefer `dotenv` files or the OS keychain. NOT for large blobs (>1 MiB per value) - write to disk instead.
+
+Storage: a single JSON file under the global opencode state dir (Global.Path.state/kv.json). Writes are atomic (tmp file + rename) and protected by an in-process lock so concurrent calls in the same chat are linearised. Cross-process safety is best-effort - last writer wins.
+
+Parameters:
+- `action` (required): one of `get`, `set`, `delete`, `list`, `keys`, `incr`, `touch`, `pop`, `clear`, `info`.
+- `key` (optional): the key. Required for `get`, `set`, `delete`, `incr`, `touch`, `pop`. Up to 256 chars. ASCII letters, digits, `_`, `-`, `.`, `:`, `/` only.
+- `value` (optional): the value. Required for `set`. Any JSON value (string, number, boolean, null, object, array). Stringified value must be <= 1,048,576 bytes (1 MiB).
+- `namespace` (optional): logical bucket. Default `default`. Up to 64 chars, same charset as keys (no `/`). Use this to group state by project, agent, feature.
+- `ttl_seconds` (optional): for `set`, `incr`, `touch`. Auto-expire the entry after this many seconds. Range 1 - 31,536,000 (1 year). Omit to keep indefinitely.
+- `expires_at` (optional): for `set`, `touch`. ISO-8601 timestamp. Mutually exclusive with `ttl_seconds`.
+- `delta` (optional): for `incr`. Integer delta (negative allowed). Default `1`. Stored value must be a finite number; missing key is initialised to `0` then incremented.
+- `prefix` (optional): for `list`, `keys`. Filter to keys that start with this prefix.
+- `limit` (optional): for `list`, `keys`. Max entries returned. Default 100, max 1000. Older keys win when truncated.
+- `include_expired` (optional): for `list`, `keys`, `info`. When true, also report keys whose TTL has elapsed (still excludes them from `get`). Default false.
+- `confirm` (optional): for `clear`. Must be `true` to wipe all entries in the namespace (or all namespaces when `namespace` is omitted and `all_namespaces=true`).
+- `all_namespaces` (optional): for `list`, `keys`, `info`, `clear`. When true, span every namespace. Default false.
+
+Behaviour:
+- `get` returns metadata.value (or null if missing/expired) and metadata.found. Expired entries are removed lazily on read.
+- `set` returns metadata.previous_value (the prior value, or null if new) and metadata.created (true on insert, false on update).
+- `delete` returns metadata.deleted (true if a key existed). Idempotent.
+- `incr` returns metadata.value (new number) and metadata.previous_value. Errors if the existing value is not a number.
+- `touch` updates the TTL/expires_at on an existing entry without touching its value. Returns metadata.touched.
+- `pop` is `get` + `delete` in one atomic operation; returns the value and removes the key.
+- `list` returns metadata.entries: array of { namespace, key, value, expires_at? }. Order: alphabetical by `${namespace}/${key}`.
+- `keys` is `list` without values.
+- `clear` empties a namespace (or all namespaces with `all_namespaces=true` + `confirm=true`). Returns metadata.removed (count).
+- `info` returns metadata.namespaces, metadata.total_entries, metadata.bytes_on_disk, metadata.path.
+
+Examples:
+- Persist a counter for tries: `{ "action": "incr", "key": "build_failures", "namespace": "ci" }`
+- Cache a slow lookup for 1h: `{ "action": "set", "key": "weather:london", "value": { "temp": 18 }, "ttl_seconds": 3600 }`
+- Fetch sticky flag: `{ "action": "get", "key": "migration_v3_done", "namespace": "proj-x" }`
+- List everything in a namespace: `{ "action": "keys", "namespace": "proj-x" }`
+- Inspect store: `{ "action": "info", "all_namespaces": true }`
+- Wipe a project's state: `{ "action": "clear", "namespace": "proj-x", "confirm": true }`
