@@ -337,8 +337,9 @@ test(
         expect((addResult.status as any)["big-server"]?.status ?? (addResult.status as any).status).toBe("connected")
 
         const toolsBefore = yield* mcp.tools()
-        // Only the search tool; no separate mcp_load.
-        expect(Object.keys(toolsBefore).sort()).toEqual(["mcp_search"])
+        // Deferred mode exposes compact helpers, not every MCP tool schema up front.
+        expect(Object.keys(toolsBefore).sort()).toEqual(["mcp_autoload", "mcp_search", "tool_search"])
+        expect((toolsBefore as any).tool_search).toBe((toolsBefore as any).mcp_search)
 
         const search = (toolsBefore as any).mcp_search
         const searchResult = yield* Effect.tryPromise(() => execTool(search, { query: "create", limit: 1 }))
@@ -353,6 +354,49 @@ test(
         expect(afterKeys).not.toContain("big-server_delete_issue")
       }),
   ),
+)
+
+test(
+  "mcp_autoload selects and calls a deferred tool by id",
+  withInstance(
+    {
+      "big-server": {
+        type: "local",
+        command: ["echo", "test"],
+        defer: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "big-server"
+        const state = getOrCreateClientState("big-server")
+        state.tools = [
+          {
+            name: "delete_issue",
+            description: "Delete an issue",
+            inputSchema: { type: "object", properties: { id: { type: "number" } } },
+          },
+        ]
+
+        yield* mcp.add("big-server", {
+          type: "local",
+          command: ["echo", "test"],
+          defer: true,
+        })
+
+        const toolsBefore = yield* mcp.tools()
+        const autoload = (toolsBefore as any).mcp_autoload
+        const result = yield* Effect.tryPromise(() =>
+          execTool(autoload, { tool: "big-server_delete_issue", arguments: { id: 123 } }),
+        )
+        expect(result.content[0].text).toBe("called delete_issue")
+        expect(state.callToolCalls.at(-1)).toEqual({ name: "delete_issue", arguments: { id: 123 } })
+
+        const toolsAfter = yield* mcp.tools()
+        expect((toolsAfter as any)["big-server_delete_issue"]).toBeDefined()
+      }),
+  ),
+  10_000,
 )
 
 test(
@@ -450,7 +494,7 @@ test(
         yield* mcp.add("auto", { type: "local", command: ["echo", "test"] })
 
         const tools = yield* mcp.tools()
-        expect(Object.keys(tools).sort()).toEqual(["mcp_search"])
+        expect(Object.keys(tools).sort()).toEqual(["mcp_autoload", "mcp_search", "tool_search"])
       }),
     { defer_mcp_tools: true },
   ),
