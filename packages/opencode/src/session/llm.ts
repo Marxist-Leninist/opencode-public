@@ -24,6 +24,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { DEFERRED_CALL_TOOL } from "@/mcp"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -346,6 +347,29 @@ const live: Layer.Layer<
             return {
               ...failed.toolCall,
               toolName: lower,
+            }
+          }
+          if (tools[DEFERRED_CALL_TOOL] && lower.includes("_")) {
+            let originalInput: unknown = failed.toolCall.input
+            if (typeof originalInput === "string") {
+              try {
+                originalInput = JSON.parse(originalInput)
+              } catch {}
+            }
+            l.info("repairing deferred mcp tool call", {
+              tool: failed.toolCall.toolName,
+              repaired: DEFERRED_CALL_TOOL,
+            })
+            return {
+              ...failed.toolCall,
+              input: JSON.stringify({
+                tool: failed.toolCall.toolName,
+                arguments:
+                  originalInput && typeof originalInput === "object" && !Array.isArray(originalInput)
+                    ? originalInput
+                    : {},
+              }),
+              toolName: DEFERRED_CALL_TOOL,
             }
           }
           return {

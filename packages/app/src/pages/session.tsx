@@ -1,4 +1,4 @@
-import type { Project, UserMessage } from "@opencode-ai/sdk/v2"
+import type { Message as SessionMessage, Part as SessionPart, Project, UserMessage } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createQuery, skipToken, useMutation, useQueryClient } from "@tanstack/solid-query"
 import {
@@ -28,8 +28,8 @@ import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { Button } from "@opencode-ai/ui/button"
 import { showToast } from "@opencode-ai/ui/toast"
-import { checksum } from "@opencode-ai/core/util/encode"
-import { useSearchParams } from "@solidjs/router"
+import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
+import { useNavigate, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
@@ -69,6 +69,90 @@ const emptyUserMessages: UserMessage[] = []
 type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
+
+type PartMap = Record<string, SessionPart[] | undefined>
+
+function compactPayload(value: unknown, max = 50_000) {
+  if (value === undefined || value === null) return ""
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2)
+  if (!text) return ""
+  if (text.startsWith("data:")) return `[data url omitted, ${text.length} chars]`
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n...[truncated ${text.length - max} chars]`
+}
+
+function partContext(part: SessionPart) {
+  switch (part.type) {
+    case "text": {
+      if (part.ignored) return ""
+      const text = compactPayload(part.text)
+      if (!text.trim()) return ""
+      return part.synthetic ? `[synthetic]\n${text}` : text
+    }
+    case "reasoning": {
+      const text = compactPayload(part.text)
+      return text.trim() ? `[reasoning]\n${text}` : ""
+    }
+    case "tool": {
+      const state = part.state
+      const lines = [`[tool:${part.tool} ${state.status}]`]
+      const input = "input" in state ? compactPayload(state.input, 12_000) : ""
+      const metadata = "metadata" in state ? state.metadata : undefined
+      const output =
+        metadata && typeof metadata === "object" && "output" in metadata
+          ? compactPayload((metadata as { output?: unknown }).output, 50_000)
+          : ""
+      if (input.trim()) lines.push("input:\n" + input)
+      if (output.trim()) lines.push("output:\n" + output)
+      return lines.join("\n")
+    }
+    case "file": {
+      const label = part.filename || part.url || "attachment"
+      const meta = [part.mime, part.source?.type].filter(Boolean).join(", ")
+      return `[file:${label}${meta ? ` (${meta})` : ""}]`
+    }
+    case "agent":
+      return `[@${part.name}]`
+    default:
+      return compactPayload(part, 12_000)
+  }
+}
+
+function buildContextTranscript(input: {
+  sessionID: string
+  targetMessageID: string
+  messages: SessionMessage[]
+  parts: PartMap
+}) {
+  const includedParents = new Set<string>()
+  let targetSeen = false
+  const blocks: string[] = []
+
+  for (const message of input.messages) {
+    if (message.role === "user") {
+      if (targetSeen) continue
+      includedParents.add(message.id)
+      if (message.id === input.targetMessageID) targetSeen = true
+    } else if (!message.parentID || !includedParents.has(message.parentID)) {
+      continue
+    }
+
+    const parts = input.parts[message.id] ?? []
+    const body = parts
+      .map(partContext)
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .join("\n\n")
+    if (!body) continue
+
+    const role = message.role === "user" ? "User" : `Assistant${message.agent ? ` (${message.agent})` : ""}`
+    blocks.push(`## ${role}\n\n${body}`)
+  }
+
+  return [`# Session Context`, `Session: ${input.sessionID}`, `Through message: ${input.targetMessageID}`, "", ...blocks].join(
+    "\n",
+  )
+}
 
 type ChangeMode = "git" | "branch" | "turn"
 type VcsMode = "git" | "branch"
@@ -333,6 +417,7 @@ export default function Page() {
   const comments = useComments()
   const terminal = useTerminal()
   const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
+  const navigate = useNavigate()
   const { params, sessionKey, tabs, view } = useSessionLayout()
 
   createEffect(() => {
@@ -1691,6 +1776,41 @@ export default function Page() {
     return revertMutation.mutateAsync(input)
   }
 
+  const fork = async (input: { sessionID: string; messageID: string }) => {
+    if (reverting()) return
+    const parts = sync.data.part[input.messageID] ?? []
+    const restored = extractPromptFromParts(parts, {
+      directory: sdk.directory,
+      attachmentName: language.t("common.attachment"),
+    })
+    const dir = base64Encode(sdk.directory)
+    await halt(input.sessionID)
+      .then(() => sdk.client.session.fork(input))
+      .then((forked) => {
+        if (!forked.data) {
+          showToast({ variant: "error", title: language.t("common.requestFailed") })
+          return
+        }
+        prompt.set(restored, undefined, { dir, id: forked.data.id })
+        navigate(`/${dir}/session/${forked.data.id}`)
+      })
+      .catch(fail)
+  }
+
+  const copyContext = async (input: { sessionID: string; messageID: string }) => {
+    const context = buildContextTranscript({
+      sessionID: input.sessionID,
+      targetMessageID: input.messageID,
+      messages: sync.data.message[input.sessionID] ?? [],
+      parts: sync.data.part,
+    })
+    if (!context.trim()) return
+    await navigator.clipboard.writeText(context).catch((err) => {
+      fail(err)
+      throw err
+    })
+  }
+
   const restore = (id: string) => {
     if (!params.id || reverting()) return
     return restoreMutation.mutateAsync(id)
@@ -1704,7 +1824,7 @@ export default function Page() {
       .map((item) => ({ id: item.id, text: line(item.id) }))
   })
 
-  const actions = { revert }
+  const actions = { copyContext, fork, revert }
 
   createEffect(() => {
     const sessionID = params.id

@@ -7,6 +7,7 @@ import { withStatics } from "@/util/schema"
 import { Plugin } from "../plugin"
 import { ProviderID } from "./schema"
 import { Array as Arr, Effect, Layer, Record, Result, Context, Schema } from "effect"
+import { BusEvent } from "@/bus/bus-event"
 
 const When = Schema.Struct({
   key: Schema.String,
@@ -79,6 +80,13 @@ export const ValidationFailed = namedSchemaError("ProviderAuthValidationFailed",
   field: Schema.String,
   message: Schema.String,
 })
+
+export const Updated = BusEvent.define(
+  "provider.auth.updated",
+  Schema.Struct({
+    providerID: Schema.String,
+  }),
+)
 
 export type Error =
   | Auth.AuthError

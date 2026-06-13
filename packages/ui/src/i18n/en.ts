@@ -144,6 +144,7 @@ export const dict: Record<string, string> = {
   "ui.message.collapse": "Collapse message",
   "ui.message.copy": "Copy",
   "ui.message.copyMessage": "Copy message",
+  "ui.message.copyContext": "Copy context to here",
   "ui.message.forkMessage": "Fork to new session",
   "ui.message.revertMessage": "Revert message",
   "ui.message.copyResponse": "Copy response",

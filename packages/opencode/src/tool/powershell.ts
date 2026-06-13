@@ -105,11 +105,11 @@ function firstExisting(paths: Array<string | undefined>): string | undefined {
 }
 
 function findPwsh(): string | undefined {
-  return firstExisting(PWSH_CANDIDATES) ?? which("pwsh.exe") ?? which("pwsh")
+  return firstExisting(PWSH_CANDIDATES) ?? which("pwsh.exe") ?? which("pwsh") ?? undefined
 }
 
 function findPowershell(): string | undefined {
-  return firstExisting(POWERSHELL_CANDIDATES) ?? which("powershell.exe") ?? which("powershell")
+  return firstExisting(POWERSHELL_CANDIDATES) ?? which("powershell.exe") ?? which("powershell") ?? undefined
 }
 
 // Resolve to a full executable PATH once and cache it. Resolving by path (rather
@@ -424,4 +424,4 @@ export const PowerShellTool = Tool.define(
   }),
 )
 
-export const __testing = { pickExecutable, checkExecutable, runScript, PRELUDE }
+export const __testing = { pickExecutable, runScript, PRELUDE }

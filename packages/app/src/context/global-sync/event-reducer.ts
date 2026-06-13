@@ -24,7 +24,13 @@ export function applyGlobalEvent(input: {
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
   refresh: () => void
 }) {
-  if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
+  if (
+    input.event.type === "global.disposed" ||
+    input.event.type === "server.connected" ||
+    input.event.type.startsWith("config.") ||
+    input.event.type.startsWith("mcp.") ||
+    input.event.type.startsWith("provider.")
+  ) {
     input.refresh()
     return
   }
@@ -101,6 +107,10 @@ export function applyDirectoryEvent(input: {
   setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
 }) {
   const event = input.event
+  if (event.type.startsWith("config.") || event.type.startsWith("mcp.") || event.type.startsWith("provider.")) {
+    input.push(input.directory)
+    return
+  }
   switch (event.type) {
     case "server.instance.disposed": {
       input.push(input.directory)

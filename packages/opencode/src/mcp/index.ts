@@ -115,6 +115,8 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
 const DEFERRED_SEARCH_TOOL = "mcp_search"
+const DEFERRED_SEARCH_ALIAS_TOOL = "tool_search"
+export const DEFERRED_CALL_TOOL = "mcp_autoload"
 const DEFAULT_DEFERRED_SEARCH_LIMIT = 5
 const MAX_DEFERRED_SEARCH_LIMIT = 50
 const DEFAULT_DEFERRED_SEARCH_MODE: DeferredSearchMode = "smart"
@@ -526,46 +528,55 @@ function convertMcpTool(
     additionalProperties: false,
   }
 
-  const callOnce = (c: MCPClient, args: unknown) =>
-    c.callTool(
-      {
-        name: mcpTool.name,
-        arguments: (args || {}) as Record<string, unknown>,
-      },
-      CallToolResultSchema,
-      {
-        resetTimeoutOnProgress: true,
-        timeout,
-      },
-    )
-
   return dynamicTool({
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
-    execute: async (args: unknown) => {
-      try {
-        return await callOnce(client, args)
-      } catch (err) {
-        if (fallbacks.length === 0) throw err
-        log.warn("primary mcp tool call failed; attempting failover", {
-          tool: mcpTool.name,
-          error: err instanceof Error ? err.message : String(err),
-          fallbacks: fallbacks.map((f) => f.server),
-        })
-        let lastErr: unknown = err
-        for (const fb of fallbacks) {
-          try {
-            const result = await callOnce(fb.client, args)
-            log.info("mcp tool call succeeded via failover", { tool: mcpTool.name, via: fb.server })
-            return result
-          } catch (fbErr) {
-            lastErr = fbErr
-          }
-        }
-        throw lastErr
-      }
-    },
+    execute: (args: unknown) => callMcpTool(mcpTool, client, args, timeout, fallbacks),
   })
+}
+
+function callMcpToolOnce(mcpTool: MCPToolDef, client: MCPClient, args: unknown, timeout?: number) {
+  return client.callTool(
+    {
+      name: mcpTool.name,
+      arguments: (args || {}) as Record<string, unknown>,
+    },
+    CallToolResultSchema,
+    {
+      resetTimeoutOnProgress: true,
+      timeout,
+    },
+  )
+}
+
+async function callMcpTool(
+  mcpTool: MCPToolDef,
+  client: MCPClient,
+  args: unknown,
+  timeout?: number,
+  fallbacks: ReadonlyArray<{ server: string; client: MCPClient }> = [],
+) {
+  try {
+    return await callMcpToolOnce(mcpTool, client, args, timeout)
+  } catch (err) {
+    if (fallbacks.length === 0) throw err
+    log.warn("primary mcp tool call failed; attempting failover", {
+      tool: mcpTool.name,
+      error: err instanceof Error ? err.message : String(err),
+      fallbacks: fallbacks.map((f) => f.server),
+    })
+    let lastErr: unknown = err
+    for (const fb of fallbacks) {
+      try {
+        const result = await callMcpToolOnce(mcpTool, fb.client, args, timeout)
+        log.info("mcp tool call succeeded via failover", { tool: mcpTool.name, via: fb.server })
+        return result
+      } catch (fbErr) {
+        lastErr = fbErr
+      }
+    }
+    throw lastErr
+  }
 }
 
 function defs(key: string, client: MCPClient, timeout?: number) {
@@ -625,6 +636,7 @@ interface State {
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
   selected: Record<string, Set<string>>
+  config: Record<string, ConfigMCP.Info>
 }
 
 export interface Interface {
@@ -1012,6 +1024,7 @@ export const layer = Layer.effect(
           clients: {},
           defs: {},
           selected: {},
+          config: {},
         }
 
         yield* Effect.forEach(
@@ -1022,6 +1035,7 @@ export const layer = Layer.effect(
                 log.error("Ignoring MCP config entry without type", { key })
                 return
               }
+              s.config[key] = mcp
 
               if (mcp.enabled === false) {
                 s.status[key] = { status: "disabled" }
@@ -1089,6 +1103,7 @@ export const layer = Layer.effect(
       s.clients[name] = client
       s.defs[name] = listed
       watch(s, name, client, bridge, timeout)
+      yield* bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return s.status[name]
     })
 
@@ -1096,7 +1111,7 @@ export const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
-      const config = cfg.mcp ?? {}
+      const config = { ...(cfg.mcp ?? {}), ...s.config }
       const result: Record<string, Status> = {}
 
       for (const [key, mcp] of Object.entries(config)) {
@@ -1114,6 +1129,7 @@ export const layer = Layer.effect(
 
     const createAndStore = Effect.fn("MCP.createAndStore")(function* (name: string, mcp: ConfigMCP.Info) {
       const s = yield* InstanceState.get(state)
+      s.config[name] = mcp
       const result = yield* create(name, mcp)
 
       s.status[name] = result.status
@@ -1127,6 +1143,7 @@ export const layer = Layer.effect(
     })
 
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCP.Info) {
+      yield* cfgSvc.update({ mcp: { [name]: mcp } } as Config.Info, { dispose: false })
       yield* createAndStore(name, mcp)
       const s = yield* InstanceState.get(state)
       return { status: s.status }
@@ -1146,6 +1163,8 @@ export const layer = Layer.effect(
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      if (s.config[name]) s.config[name] = { ...s.config[name], enabled: false }
+      yield* bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
     const tools = Effect.fn("MCP.tools")(function* () {
@@ -1153,7 +1172,7 @@ export const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
-      const config = cfg.mcp ?? {}
+      const config = { ...(cfg.mcp ?? {}), ...s.config }
       const defaultTimeout = cfg.experimental?.mcp_timeout
       const deferredServers: string[] = []
 
@@ -1227,7 +1246,7 @@ export const layer = Layer.effect(
           })
           .join(", ")
 
-        result[DEFERRED_SEARCH_TOOL] = dynamicTool({
+        const searchTool = dynamicTool({
           description:
             `Search and auto-load tools from deferred MCP servers (${catalogHint}). ` +
             `Matched tools become available on the next step. Query forms: ` +
@@ -1347,6 +1366,91 @@ export const layer = Layer.effect(
             return jsonToolResult(out)
           },
         })
+        result[DEFERRED_SEARCH_TOOL] = searchTool
+        result[DEFERRED_SEARCH_ALIAS_TOOL] = searchTool
+
+        const resolveDeferredTool = (request: string, server?: string) => {
+          const exact =
+            findDeferredTool({ defs: s.defs, servers: deferredServers, tool: request, server }) ??
+            findDeferredTool({ defs: s.defs, servers: deferredServers, name: request, server })
+          if (exact) return exact
+          const [match] = searchDeferredToolDefinitions({
+            defs: s.defs,
+            selected: s.selected,
+            servers: deferredServers,
+            query: request,
+            server,
+            limit: 1,
+            mode: "smart",
+          })
+          if (!match) return
+          return findDeferredTool({ defs: s.defs, servers: deferredServers, tool: match.tool })
+        }
+
+        result[DEFERRED_CALL_TOOL] = dynamicTool({
+          description:
+            `Auto-load and call a tool from deferred MCP servers (${catalogHint}). ` +
+            `Use when a deferred MCP tool id/name is known or a previous tool call was rejected as unavailable.`,
+          inputSchema: jsonSchema({
+            type: "object",
+            properties: {
+              tool: {
+                type: "string",
+                description: "Deferred MCP tool id or name, for example `server_tool_name`.",
+              },
+              server: {
+                type: "string",
+                description: "Optional MCP server restriction.",
+              },
+              arguments: {
+                type: "object",
+                description: "Arguments to pass through to the MCP tool.",
+                additionalProperties: true,
+              },
+            },
+            required: ["tool"],
+            additionalProperties: false,
+          }),
+          execute: async (args: unknown) => {
+            const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {}
+            const requested = readString(input.tool)
+            const serverFilter = readString(input.server)
+            if (!requested) return jsonToolResult({ error: "Missing deferred MCP tool id/name." })
+
+            const found = resolveDeferredTool(requested, serverFilter)
+            if (!found) {
+              return jsonToolResult({
+                error: "No deferred MCP tool matched the requested id/name.",
+                tool: requested,
+              })
+            }
+
+            const client = s.clients[found.server]
+            if (!client) {
+              return jsonToolResult({
+                error: "Matched deferred MCP server is not connected.",
+                server: found.server,
+                tool: found.key,
+              })
+            }
+
+            let toolArgs = input.arguments
+            if (typeof toolArgs === "string") {
+              try {
+                toolArgs = JSON.parse(toolArgs)
+              } catch {}
+            }
+            if (!toolArgs || typeof toolArgs !== "object" || Array.isArray(toolArgs)) toolArgs = {}
+
+            s.selected[found.server] ??= new Set<string>()
+            s.selected[found.server].add(found.tool.name)
+            await bridge.promise(bus.publish(ToolsChanged, { server: found.server }).pipe(Effect.ignore))
+
+            const entry = config[found.server]
+            const timeout = entry && isMcpConfigured(entry) ? entry.timeout ?? defaultTimeout : defaultTimeout
+            return callMcpTool(found.tool, client, toolArgs, timeout, fallbacksFor(found.server, found.tool.name))
+          },
+        })
       }
 
       return result
@@ -1413,6 +1517,9 @@ export const layer = Layer.effect(
     })
 
     const getMcpConfig = Effect.fnUntraced(function* (mcpName: string) {
+      const s = yield* InstanceState.get(state)
+      const dynamic = s.config[mcpName]
+      if (dynamic && isMcpConfigured(dynamic)) return dynamic
       const cfg = yield* cfgSvc.get()
       const mcpConfig = cfg.mcp?.[mcpName]
       if (!mcpConfig || !isMcpConfigured(mcpConfig)) return undefined

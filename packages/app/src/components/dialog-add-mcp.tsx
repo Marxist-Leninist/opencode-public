@@ -9,6 +9,7 @@ import { useMutation } from "@tanstack/solid-query"
 import { batch, For, Show, createSignal } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useSDK } from "@/context/sdk"
+import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import {
   buildMcpServerConfig,
@@ -53,6 +54,7 @@ function validate(form: FormState): Record<string, string> {
 export function DialogAddMcp() {
   const dialog = useDialog()
   const sdk = useSDK()
+  const globalSync = useGlobalSync()
   const sync = useSync()
   const [showAdvanced, setShowAdvanced] = createSignal(false)
 
@@ -103,6 +105,7 @@ export function DialogAddMcp() {
     },
     onSuccess: (data) => {
       if (data) sync.set("mcp", data)
+      void globalSync.bootstrap()
       showToast({
         variant: "success",
         title: `Added MCP server "${form.name.trim()}"`,

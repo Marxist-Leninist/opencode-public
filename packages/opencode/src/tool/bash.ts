@@ -512,13 +512,13 @@ export const BashTool = Tool.define(
             if (process.platform !== "win32") {
               yield* handle
                 .kill({ forceKillAfter: "3 seconds" })
-                .pipe(Effect.catchAllCause(() => Effect.void))
+                .pipe(Effect.catchCause(() => Effect.void))
             }
           }
 
           return exit.kind === "exit" ? exit.code : null
         }),
-      ).pipe(Effect.catchAllCause(() => Effect.succeed(-1)))
+      ).pipe(Effect.catchCause(() => Effect.succeed(-1)))
 
       const meta: string[] = []
       if (expired) {

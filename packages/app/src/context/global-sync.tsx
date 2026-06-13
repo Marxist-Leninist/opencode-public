@@ -287,7 +287,13 @@ function createGlobalSync() {
         },
         setGlobalProject: setProjects,
       })
-      if (event.type === "server.connected" || event.type === "global.disposed") {
+      if (
+        event.type === "server.connected" ||
+        event.type === "global.disposed" ||
+        event.type.startsWith("config.") ||
+        event.type.startsWith("mcp.") ||
+        event.type.startsWith("provider.")
+      ) {
         if (recent) return
         for (const directory of Object.keys(children.children)) {
           queue.push(directory)

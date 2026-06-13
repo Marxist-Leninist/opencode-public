@@ -141,6 +141,7 @@ export interface MessageProps {
 export type SessionAction = (input: { sessionID: string; messageID: string }) => Promise<void> | void
 
 export type UserActions = {
+  copyContext?: SessionAction
   fork?: SessionAction
   revert?: SessionAction
 }
@@ -999,9 +1000,11 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
   const i18n = useI18n()
   const [state, setState] = createStore({
     copied: false,
+    contextCopied: false,
     busy: false,
   })
   const copied = () => state.copied
+  const contextCopied = () => state.contextCopied
   const busy = () => state.busy
 
   const textPart = createMemo(
@@ -1067,6 +1070,36 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
       .finally(() => setState("busy", false))
   }
 
+  const fork = () => {
+    const act = props.actions?.fork
+    if (!act || busy()) return
+    setState("busy", true)
+    void Promise.resolve()
+      .then(() =>
+        act({
+          sessionID: props.message.sessionID,
+          messageID: props.message.id,
+        }),
+      )
+      .finally(() => setState("busy", false))
+  }
+
+  const copyContext = () => {
+    const act = props.actions?.copyContext
+    if (!act) return
+    void Promise.resolve()
+      .then(() =>
+        act({
+          sessionID: props.message.sessionID,
+          messageID: props.message.id,
+        }),
+      )
+      .then(() => {
+        setState("contextCopied", true)
+        setTimeout(() => setState("contextCopied", false), 2000)
+      })
+  }
+
   return (
     <div data-component="user-message">
       <Show when={attachments().length > 0}>
@@ -1130,6 +1163,22 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
                 </Show>
               </span>
             </Show>
+            <Show when={props.actions?.fork}>
+              <Tooltip value={i18n.t("ui.message.forkMessage")} placement="top" gutter={4}>
+                <IconButton
+                  icon="fork"
+                  size="normal"
+                  variant="ghost"
+                  disabled={!!busy()}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    fork()
+                  }}
+                  aria-label={i18n.t("ui.message.forkMessage")}
+                />
+              </Tooltip>
+            </Show>
             <Show when={props.actions?.revert}>
               <Tooltip value={i18n.t("ui.message.revertMessage")} placement="top" gutter={4}>
                 <IconButton
@@ -1143,6 +1192,25 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
                     revert()
                   }}
                   aria-label={i18n.t("ui.message.revertMessage")}
+                />
+              </Tooltip>
+            </Show>
+            <Show when={props.actions?.copyContext}>
+              <Tooltip
+                value={contextCopied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyContext")}
+                placement="top"
+                gutter={4}
+              >
+                <IconButton
+                  icon={contextCopied() ? "check" : "code-lines"}
+                  size="normal"
+                  variant="ghost"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    copyContext()
+                  }}
+                  aria-label={contextCopied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyContext")}
                 />
               </Tooltip>
             </Show>

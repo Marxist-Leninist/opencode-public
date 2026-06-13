@@ -4,6 +4,12 @@ import type { Opts, Proc } from "./pty"
 
 export type { Disp, Exit, Opts, Proc } from "./pty"
 
+function ignoreKillError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/ChildProcess\.kill|ESRCH|no such process|not found|not running|already exited/i.test(message)) return
+  throw error
+}
+
 export function spawn(file: string, args: string[], opts: Opts): Proc {
   const proc = pty.spawn(file, args, opts)
   return {
@@ -21,7 +27,11 @@ export function spawn(file: string, args: string[], opts: Opts): Proc {
       proc.resize(cols, rows)
     },
     kill(signal) {
-      proc.kill(signal)
+      try {
+        proc.kill(signal)
+      } catch (error) {
+        ignoreKillError(error)
+      }
     },
   }
 }

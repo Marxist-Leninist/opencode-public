@@ -819,9 +819,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             cwd,
           ],
         },
-        cmd: { args: ["/c", input.command] },
-        powershell: { args: ["-NoProfile", "-Command", input.command] },
-        pwsh: { args: ["-NoProfile", "-Command", input.command] },
+        cmd: { args: ["/d", "/c", input.command] },
+        powershell: { args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", input.command] },
+        pwsh: { args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", input.command] },
         "": { args: ["-c", input.command] },
       }
 
@@ -842,6 +842,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       let output = ""
       let aborted = false
+      let runningPID: number | undefined
 
       const finish = Effect.uninterruptible(
         Effect.gen(function* () {
@@ -868,6 +869,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       const exit = yield* Effect.gen(function* () {
         const handle = yield* spawner.spawn(cmd)
+        runningPID = handle.pid
         yield* Stream.runForEach(Stream.decodeText(handle.all), (chunk) =>
           Effect.sync(() => {
             output += chunk
@@ -881,8 +883,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }).pipe(
         Effect.scoped,
         Effect.onInterrupt(() =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             aborted = true
+            if (process.platform === "win32") {
+              yield* Effect.promise(() => Shell.killPidTree(runningPID).catch(() => {}))
+            }
           }),
         ),
         Effect.orDie,

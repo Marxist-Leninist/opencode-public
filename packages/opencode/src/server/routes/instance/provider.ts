@@ -11,6 +11,7 @@ import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Effect } from "effect"
 import { jsonRequest } from "./trace"
+import { Bus } from "@/bus"
 
 export const ProviderRoutes = lazy(() =>
   new Hono()
@@ -147,11 +148,13 @@ export const ProviderRoutes = lazy(() =>
           const providerID = c.req.valid("param").providerID
           const { method, code } = c.req.valid("json")
           const svc = yield* ProviderAuth.Service
+          const bus = yield* Bus.Service
           yield* svc.callback({
             providerID,
             method,
             code,
           })
+          yield* bus.publish(ProviderAuth.Updated, { providerID }).pipe(Effect.ignore)
           return true
         }),
     ),

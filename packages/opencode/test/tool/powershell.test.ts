@@ -28,10 +28,11 @@ const baseCtx: Tool.Context = {
 const noAbort = AbortSignal.any([])
 
 async function detectExecutable(): Promise<string | null> {
-  for (const exe of ["pwsh", "powershell"]) {
-    if (await PSTesting.checkExecutable(exe, noAbort)) return exe
+  try {
+    return await PSTesting.pickExecutable("auto", noAbort)
+  } catch {
+    return null
   }
-  return null
 }
 
 describe("tool.powershell", () => {
@@ -228,7 +229,7 @@ describe("tool.powershell", () => {
           },
           baseCtx,
         )
-        expect(["pwsh", "powershell"]).toContain(result.metadata.executable)
+        expect(/(^|[\\/])(pwsh|powershell)(\.exe)?$/i.test(result.metadata.executable)).toBe(true)
         expect(result.metadata.preferred).toBe("auto")
       }),
     ),

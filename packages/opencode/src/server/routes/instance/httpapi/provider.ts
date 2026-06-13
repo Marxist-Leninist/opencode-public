@@ -7,6 +7,7 @@ import { mapValues } from "remeda"
 import { Effect, Layer, Schema } from "effect"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "./auth"
+import { Bus } from "@/bus"
 
 const root = "/provider"
 
@@ -76,6 +77,7 @@ export const providerHandlers = Layer.unwrap(
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
     const svc = yield* ProviderAuth.Service
+    const bus = yield* Bus.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
@@ -130,6 +132,7 @@ export const providerHandlers = Layer.unwrap(
           code: ctx.payload.code,
         })
         .pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      yield* bus.publish(ProviderAuth.Updated, { providerID: ctx.params.providerID }).pipe(Effect.ignore)
       return true
     })
 
@@ -138,6 +141,7 @@ export const providerHandlers = Layer.unwrap(
     )
   }),
 ).pipe(
+  Layer.provide(Bus.defaultLayer),
   Layer.provide(ProviderAuth.defaultLayer),
   Layer.provide(Provider.defaultLayer),
   Layer.provide(Config.defaultLayer),
