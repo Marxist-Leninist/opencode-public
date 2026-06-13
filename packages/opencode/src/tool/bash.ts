@@ -508,16 +508,12 @@ export const BashTool = Tool.define(
           if (exit.kind === "abort" || exit.kind === "timeout") {
             if (exit.kind === "abort") aborted = true
             else expired = true
-            // On Windows the spawned shell can be blocked waiting on a detached
-            // or elevated child (e.g. `Start-Process -Verb RunAs -Wait`) that
-            // effect's handle.kill cannot reap; with Effect.orDie that kill
-            // failure crashed the whole tool call (surfacing as a raw
-            // "ChildProcess.kill" error). Reap the real process tree via
-            // taskkill FIRST, then treat the effect-level kill as best-effort so
-            // a kill failure can never fail the tool — we still return the
-            // captured output plus the timeout/abort notice.
             yield* Effect.promise(() => killPidTree(handle.pid).catch(() => {}))
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.catchAllCause(() => Effect.void))
+            if (process.platform !== "win32") {
+              yield* handle
+                .kill({ forceKillAfter: "3 seconds" })
+                .pipe(Effect.catchAllCause(() => Effect.void))
+            }
           }
 
           return exit.kind === "exit" ? exit.code : null

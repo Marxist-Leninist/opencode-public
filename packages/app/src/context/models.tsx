@@ -47,11 +47,28 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       }),
     )
 
+    // providers the user explicitly set up (opencode.json `provider` block = "config",
+    // custom npm/plugin providers = "custom", env-key providers = "env"). models.dev
+    // catalog-only entries are "api" and stay gated behind the connect flow.
+    const isConfiguredSource = (source: string | undefined) =>
+      source === "config" || source === "custom" || source === "env"
+
+    const configuredProviderIds = createMemo(() => {
+      const ids = new Set<string>()
+      for (const p of providers.all()) if (isConfiguredSource(p.source)) ids.add(p.id)
+      return ids
+    })
+
     const available = createMemo(() => {
       const connected = new Set(providers.connected().map((p) => p.id))
       return providers.all().flatMap((p) =>
         Object.values(p.models)
-          .filter((m) => connected.has(p.id) || isDefaultVisibleModel({ providerID: p.id, modelID: m.id }))
+          .filter(
+            (m) =>
+              connected.has(p.id) ||
+              isConfiguredSource(p.source) ||
+              isDefaultVisibleModel({ providerID: p.id, modelID: m.id }),
+          )
           .map((m) => ({
             ...m,
             provider: p,
@@ -131,6 +148,8 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       if (state === "hide") return false
       if (state === "show") return true
       if (isDefaultVisibleModel(model)) return true
+      // show every model from a provider the user explicitly configured (e.g. mimo token-plan)
+      if (configuredProviderIds().has(model.providerID)) return true
       if (model.providerID === "openrouter") return false
       if (latestSet().has(key)) return true
       const date = release().get(key)

@@ -5,6 +5,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { InstanceState } from "@/effect"
+import { killTree } from "../shell/shell"
 import DESCRIPTION from "./open.txt"
 import * as Tool from "./tool"
 
@@ -72,19 +73,23 @@ function runProcess(
   return new Promise((resolve) => {
     let settled = false
     const child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, detached: false })
-    const timer = setTimeout(() => {
-      if (!settled) {
+    const childExited = () => child.exitCode !== null || child.signalCode !== null
+    const stopChild = () => {
+      void killTree(child, { exited: childExited }).catch(() => {
         try {
           child.kill()
         } catch {}
+      })
+    }
+    const timer = setTimeout(() => {
+      if (!settled) {
+        stopChild()
         settled = true
         resolve({ code: null, stderr: "timeout" })
       }
     }, timeoutMs)
     const onAbort = () => {
-      try {
-        child.kill()
-      } catch {}
+      stopChild()
     }
     signal.addEventListener("abort", onAbort, { once: true })
     let stderr = ""

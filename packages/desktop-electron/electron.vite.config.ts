@@ -1,6 +1,8 @@
 import { defineConfig } from "electron-vite"
 import appPlugin from "@opencode-ai/app/vite"
 import * as fs from "node:fs/promises"
+import * as path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
@@ -9,6 +11,16 @@ const channel = (() => {
 })()
 
 const OPENCODE_SERVER_DIST = "../opencode/dist/node"
+
+// `electron-vite dev` is the only mode that re-bundles the ~20MB backend into the main process
+// on every cold start (minutes). In dev/preview we run from the repo, so we can externalize the
+// import to the backend's ACTUAL build location — where all its relative requires, tree-sitter
+// wasm, and node_modules resolve exactly as built — making the main build ~0.4s. Packaging still
+// inlines it (below) so the backend ships inside the app.
+const isDevServe = process.argv.includes("dev")
+const serverEntryUrl = pathToFileURL(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), OPENCODE_SERVER_DIST, "node.js"),
+).href
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 const fastBuild = process.env.OPENCODE_FAST_BUILD === "true" || process.env.OPENCODE_FAST_BUILD === "1"
@@ -41,12 +53,20 @@ export default defineConfig({
         name: "opencode:virtual-server-module",
         enforce: "pre",
         resolveId(id) {
-          if (id === "virtual:opencode-server") return this.resolve(`${OPENCODE_SERVER_DIST}/node.js`)
+          if (id !== "virtual:opencode-server") return
+          // DEV/PREVIEW: externalize to the backend's source build dir (loaded only via dynamic
+          // import() at runtime, so safe) — skips re-bundling the 20MB blob, ~0.4s main build.
+          if (isDevServe) return { id: serverEntryUrl, external: true }
+          // PACKAGING: inline so the backend is bundled into the shipped app.
+          return this.resolve(`${OPENCODE_SERVER_DIST}/node.js`)
         },
       },
       {
         name: "opencode:copy-server-assets",
         async writeBundle() {
+          // Only needed for packaging (inlined backend chunk reads wasm from ./chunks).
+          // In dev the backend runs from its source dir, so nothing to copy.
+          if (isDevServe) return
           for (const l of await fs.readdir(OPENCODE_SERVER_DIST)) {
             if (!l.endsWith(".wasm")) continue
             await fs.writeFile(`./out/main/chunks/${l}`, await fs.readFile(`${OPENCODE_SERVER_DIST}/${l}`))

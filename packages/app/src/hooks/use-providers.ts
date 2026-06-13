@@ -6,6 +6,8 @@ import { createMemo } from "solid-js"
 export const popularProviders = [
   "opencode",
   "opencode-go",
+  "mimo",
+  "xiaomi",
   "anthropic",
   "github-copilot",
   "openai",
@@ -14,6 +16,11 @@ export const popularProviders = [
   "vercel",
 ]
 const popularProviderSet = new Set(popularProviders)
+
+// user-configured providers: opencode.json `provider` block ("config"), custom npm/plugin
+// providers ("custom"), and env-key providers ("env"). Catalog-only entries are "api".
+const isConfiguredSource = (source: string | undefined) =>
+  source === "config" || source === "custom" || source === "env"
 
 export function useProviders() {
   const globalSync = useGlobalSync()
@@ -32,12 +39,14 @@ export function useProviders() {
     popular: () => providers().all.filter((p) => popularProviderSet.has(p.id)),
     connected: () => {
       const connected = new Set(providers().connected)
-      return providers().all.filter((p) => connected.has(p.id))
+      return providers().all.filter((p) => connected.has(p.id) || isConfiguredSource(p.source))
     },
     paid: () => {
       const connected = new Set(providers().connected)
       return providers().all.filter(
-        (p) => connected.has(p.id) && (p.id !== "opencode" || Object.values(p.models).some((m) => m.cost?.input)),
+        (p) =>
+          (connected.has(p.id) || isConfiguredSource(p.source)) &&
+          (p.id !== "opencode" || Object.values(p.models).some((m) => m.cost?.input)),
       )
     },
   }

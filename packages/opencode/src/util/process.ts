@@ -55,6 +55,54 @@ export class RunFailedError extends Error {
 
 export type Child = ChildProcess & { exited: Promise<number> }
 
+const TASKKILL_TIMEOUT_MS = 2_000
+
+function runTaskkill(pid: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const done = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(ok)
+    }
+    const killer = launch("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    })
+    timer = setTimeout(() => {
+      try {
+        killer.kill()
+      } catch {
+        // taskkill already exited.
+      }
+      done(false)
+    }, TASKKILL_TIMEOUT_MS)
+    killer.once("exit", (code) => done(code === 0))
+    killer.once("error", () => done(false))
+  })
+}
+
+function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals | number) {
+  const fallback = () => {
+    try {
+      proc.kill(signal)
+    } catch {
+      // Process already exited.
+    }
+  }
+
+  if (process.platform === "win32" && proc.pid) {
+    void runTaskkill(proc.pid).then((ok) => {
+      if (!ok && proc.exitCode === null && proc.signalCode === null) fallback()
+    })
+    return
+  }
+
+  fallback()
+}
+
 export function spawn(cmd: string[], opts: Options = {}): Child {
   if (cmd.length === 0) throw new Error("Command is required")
   opts.abort?.throwIfAborted()
@@ -75,11 +123,11 @@ export function spawn(cmd: string[], opts: Options = {}): Child {
     if (proc.exitCode !== null || proc.signalCode !== null) return
     closed = true
 
-    proc.kill(opts.kill ?? "SIGTERM")
+    killProcessTree(proc, opts.kill ?? "SIGTERM")
 
     const ms = opts.timeout ?? 5_000
     if (ms <= 0) return
-    timer = setTimeout(() => proc.kill("SIGKILL"), ms)
+    timer = setTimeout(() => killProcessTree(proc, "SIGKILL"), ms)
   }
 
   const exited = new Promise<number>((resolve, reject) => {
@@ -153,12 +201,13 @@ export async function stop(proc: ChildProcess) {
     return
   }
 
-  const out = await run(["taskkill", "/pid", String(proc.pid), "/T", "/F"], {
-    nothrow: true,
-  })
-
-  if (out.code === 0) return
-  proc.kill()
+  const ok = await runTaskkill(proc.pid)
+  if (ok || proc.exitCode !== null || proc.signalCode !== null) return
+  try {
+    proc.kill()
+  } catch {
+    // Process already exited.
+  }
 }
 
 export async function text(cmd: string[], opts: RunOptions = {}): Promise<TextResult> {

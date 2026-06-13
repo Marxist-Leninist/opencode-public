@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -233,4 +233,20 @@ describe("tool.powershell", () => {
       }),
     ),
   )
+
+  test("runScript times out Windows PowerShell without surfacing kill errors", async () => {
+    if (process.platform !== "win32") return
+
+    const result = await PSTesting.runScript(
+      "powershell.exe",
+      "Start-Sleep -Seconds 30",
+      process.cwd(),
+      100,
+      1024,
+      new AbortController().signal,
+    )
+
+    expect(result.timedOut).toBe(true)
+    expect(result.exitCode).not.toBe(0)
+  }, 15_000)
 })

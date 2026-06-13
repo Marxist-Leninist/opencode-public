@@ -26,8 +26,12 @@ const channel = (() => {
   return "dev"
 })()
 
+const fastBuild = process.env.OPENCODE_FAST_BUILD === "true" || process.env.OPENCODE_FAST_BUILD === "1"
+
 const getBase = (): Configuration => ({
   artifactName: "opencode-electron-${os}-${arch}.${ext}",
+  // fast local builds skip LZMA compression entirely — installer is bigger but packaging is minutes faster
+  compression: fastBuild ? "store" : undefined,
   directories: {
     output: "dist",
     buildResources: "resources",
@@ -59,6 +63,7 @@ const getBase = (): Configuration => ({
   },
   win: {
     icon: `resources/icons/icon.ico`,
+    signAndEditExecutable: fastBuild ? false : undefined,
     signtoolOptions: {
       sign: signWindows,
     },

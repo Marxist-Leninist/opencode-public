@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { spawn as nodeSpawn } from "node:child_process"
 import fs from "fs/promises"
 import path from "path"
 import { Process } from "../../src/util"
@@ -40,8 +41,8 @@ describe("util.process", () => {
     })
 
     expect(out.code).not.toBe(0)
-    expect(Date.now() - started).toBeLessThan(1000)
-  }, 3000)
+    expect(Date.now() - started).toBeLessThan(process.platform === "win32" ? 5_000 : 1_000)
+  }, process.platform === "win32" ? 15_000 : 3_000)
 
   test("kills after timeout when process ignores terminate signal", async () => {
     if (process.platform === "win32") return
@@ -125,4 +126,27 @@ describe("util.process", () => {
       code: "ENOENT",
     })
   })
+
+  test("stops Windows PowerShell processes with taskkill", async () => {
+    if (process.platform !== "win32") return
+
+    const child = nodeSpawn(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"],
+      { stdio: "ignore", windowsHide: true },
+    )
+
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve)
+      child.once("error", reject)
+    })
+
+    await Process.stop(child)
+
+    const exited = await Promise.race([
+      new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+    ])
+    expect(exited || child.exitCode !== null || child.signalCode !== null).toBe(true)
+  }, 10_000)
 })

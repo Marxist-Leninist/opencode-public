@@ -661,12 +661,10 @@
     },
   },
   "trustedDependencies": [
-    "esbuild",
-    "tree-sitter-powershell",
-    "protobufjs",
     "electron",
+    "esbuild",
     "web-tree-sitter",
-    "tree-sitter-bash",
+    "protobufjs",
   ],
   "patchedDependencies": {
     "solid-js@1.9.10": "patches/solid-js@1.9.10.patch",

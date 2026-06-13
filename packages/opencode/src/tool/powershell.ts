@@ -1,7 +1,10 @@
 import { Effect, Schema } from "effect"
 import { spawn } from "node:child_process"
 import * as path from "node:path"
+import * as fs from "node:fs"
 import { Instance } from "../project/instance"
+import { killTree } from "../shell/shell"
+import { which } from "@/util/which"
 import DESCRIPTION from "./powershell.txt"
 import * as Tool from "./tool"
 
@@ -79,52 +82,78 @@ type Metadata = {
 
 const done = (result: Tool.ExecuteResult<Metadata>) => result
 
-function checkExecutable(cmd: string, signal: AbortSignal): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ac = new AbortController()
-    const onAbort = () => ac.abort()
-    signal.addEventListener("abort", onAbort, { once: true })
-    const timer = setTimeout(() => ac.abort(), 3_000)
-    let done = false
-    const finish = (ok: boolean) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      resolve(ok)
-    }
-    try {
-      const child = spawn(
-        cmd,
-        ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.Major"],
-        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, signal: ac.signal as any },
-      )
-      child.on("error", () => finish(false))
-      child.on("close", (code) => finish(code === 0))
-    } catch {
-      finish(false)
-    }
-  })
+// Known full-path install locations, checked before falling back to PATH lookup.
+const PWSH_CANDIDATES =
+  process.platform === "win32"
+    ? [
+        path.join(process.env.LOCALAPPDATA ?? "", "Programs", "PowerShell", "7", "pwsh.exe"),
+        path.join(process.env.ProgramFiles ?? "", "PowerShell", "7", "pwsh.exe"),
+        path.join(process.env["ProgramFiles(x86)"] ?? "", "PowerShell", "7", "pwsh.exe"),
+      ]
+    : []
+
+const POWERSHELL_CANDIDATES =
+  process.platform === "win32"
+    ? [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")]
+    : []
+
+function firstExisting(paths: Array<string | undefined>): string | undefined {
+  for (const p of paths) {
+    if (p && fs.existsSync(p)) return p
+  }
+  return undefined
 }
 
-async function pickExecutable(preferred: Preferred, signal: AbortSignal): Promise<string> {
+function findPwsh(): string | undefined {
+  return firstExisting(PWSH_CANDIDATES) ?? which("pwsh.exe") ?? which("pwsh")
+}
+
+function findPowershell(): string | undefined {
+  return firstExisting(POWERSHELL_CANDIDATES) ?? which("powershell.exe") ?? which("powershell")
+}
+
+// Resolve to a full executable PATH once and cache it. Resolving by path (rather
+// than spawn-probing a bare command name with a short timeout) avoids two Windows
+// failure modes that surfaced as "neither pwsh nor powershell found" / constant
+// timeouts on machines where the shell is actually present:
+//   1. `pwsh` on PATH being a non-executable .cmd shim (node:child_process spawn
+//      cannot launch .cmd files), and
+//   2. a slow PowerShell cold start (15s+ under heavy load) blowing the probe's
+//      timeout, so a present shell is misreported as missing.
+// Resolution is filesystem-only (instant) and memoized per preference.
+const resolvedCache = new Map<Preferred, string>()
+
+function resolveExecutable(preferred: Preferred): string {
+  const cached = resolvedCache.get(preferred)
+  if (cached) return cached
+
+  let resolved: string | undefined
   if (preferred === "pwsh") {
-    if (await checkExecutable("pwsh", signal)) return "pwsh"
-    throw new Error("powershell: 'pwsh' not found on PATH. Install PowerShell 7+ or use prefer='powershell' on Windows.")
-  }
-  if (preferred === "powershell") {
-    if (process.platform !== "win32") {
+    resolved = findPwsh()
+    if (!resolved)
+      throw new Error(
+        "powershell: 'pwsh' (PowerShell 7+) not found. Install from https://aka.ms/powershell or use prefer='powershell' on Windows.",
+      )
+  } else if (preferred === "powershell") {
+    if (process.platform !== "win32")
       throw new Error("powershell: prefer='powershell' is Windows-only. On macOS/Linux use prefer='pwsh'.")
-    }
-    if (await checkExecutable("powershell", signal)) return "powershell"
-    throw new Error("powershell: powershell.exe not found on PATH.")
+    resolved = findPowershell()
+    if (!resolved) throw new Error("powershell: powershell.exe not found.")
+  } else {
+    // auto: prefer pwsh 7 (faster cold start), fall back to Windows PowerShell 5.1.
+    resolved = findPwsh() ?? (process.platform === "win32" ? findPowershell() : undefined)
+    if (!resolved)
+      throw new Error(
+        "powershell: neither 'pwsh' nor 'powershell' found. Install PowerShell 7+ (https://aka.ms/powershell).",
+      )
   }
-  // auto
-  if (await checkExecutable("pwsh", signal)) return "pwsh"
-  if (process.platform === "win32" && (await checkExecutable("powershell", signal))) return "powershell"
-  throw new Error(
-    "powershell: neither 'pwsh' nor 'powershell' found on PATH. Install PowerShell 7+ (https://aka.ms/powershell).",
-  )
+
+  resolvedCache.set(preferred, resolved)
+  return resolved
+}
+
+async function pickExecutable(preferred: Preferred, _signal: AbortSignal): Promise<string> {
+  return resolveExecutable(preferred)
 }
 
 type RunResult = {
@@ -169,17 +198,44 @@ function runScript(
       env: { ...process.env, NO_COLOR: "1" },
     })
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      try {
-        child.kill("SIGKILL" as any)
-      } catch {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbortKill: () => void = () => {}
+    const finish = (code: number | null, sig: NodeJS.Signals | null, extraStderr?: string) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      ac.signal.removeEventListener("abort", onAbortKill)
+      const stderr = Buffer.concat(stderrChunks).toString("utf8")
+      resolve({
+        exitCode: typeof code === "number" ? code : null,
+        signal: sig ? String(sig) : null,
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: extraStderr ? (stderr ? `${stderr}\n${extraStderr}` : extraStderr) : stderr,
+        stdoutBytes,
+        stderrBytes,
+        stdoutTruncated,
+        stderrTruncated,
+        timedOut,
+        aborted: ac.signal.aborted && !timedOut,
+      })
+    }
+
+    const childExited = () => child.exitCode !== null || child.signalCode !== null
+    const stopChild = () => {
+      return killTree(child, { exited: childExited }).catch(() => {
         try {
           child.kill()
         } catch {
           /* noop */
         }
-      }
+      })
+    }
+
+    timer = setTimeout(() => {
+      timedOut = true
+      void stopChild().finally(() => finish(null, null))
     }, timeoutMs)
 
     const collect = (chunks: Buffer[], chunk: Buffer, isStdout: boolean) => {
@@ -218,51 +274,17 @@ function runScript(
       /* ignore - child may have died already */
     }
 
-    const onAbortKill = () => {
-      try {
-        child.kill()
-      } catch {
-        /* noop */
-      }
+    onAbortKill = () => {
+      void stopChild().finally(() => finish(null, null))
     }
     ac.signal.addEventListener("abort", onAbortKill, { once: true })
 
     child.on("error", (err) => {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      ac.signal.removeEventListener("abort", onAbortKill)
-      resolve({
-        exitCode: null,
-        signal: null,
-        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-        stderr: ((b: string) => (b ? `${b}\n${err.message}` : err.message))(
-          Buffer.concat(stderrChunks).toString("utf8"),
-        ),
-        stdoutBytes,
-        stderrBytes,
-        stdoutTruncated,
-        stderrTruncated,
-        timedOut,
-        aborted: ac.signal.aborted && !timedOut,
-      })
+      finish(null, null, err.message)
     })
 
     child.on("close", (code, sig) => {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", onAbort)
-      ac.signal.removeEventListener("abort", onAbortKill)
-      resolve({
-        exitCode: typeof code === "number" ? code : null,
-        signal: sig ? String(sig) : null,
-        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf8"),
-        stdoutBytes,
-        stderrBytes,
-        stdoutTruncated,
-        stderrTruncated,
-        timedOut,
-        aborted: ac.signal.aborted && !timedOut,
-      })
+      finish(code, sig)
     })
   })
 }

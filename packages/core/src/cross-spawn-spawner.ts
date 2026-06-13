@@ -283,7 +283,15 @@ export const make = Effect.gen(function* () {
         resume(Effect.succeed([proc, signal]))
       })
       return Effect.sync(() => {
-        proc.kill("SIGTERM")
+        if (globalThis.process.platform === "win32" && proc.pid) {
+          NodeChildProcess.exec(`taskkill /pid ${proc.pid} /T /F`, { windowsHide: true }, () => {})
+          return
+        }
+        try {
+          proc.kill("SIGTERM")
+        } catch {
+          // Process already exited or cannot be signaled from this token.
+        }
       })
     })
 
@@ -294,8 +302,9 @@ export const make = Effect.gen(function* () {
   ) => {
     if (globalThis.process.platform === "win32") {
       return Effect.callback<void, PlatformError.PlatformError>((resume) => {
-        NodeChildProcess.exec(`taskkill /pid ${proc.pid} /T /F`, { windowsHide: true }, (err) => {
-          if (err) return resume(Effect.fail(toPlatformError("kill", toError(err), command)))
+        NodeChildProcess.exec(`taskkill /pid ${proc.pid} /T /F`, { windowsHide: true }, () => {
+          // Failure to kill on Windows is common if the process is already dead or elevated.
+          // We resume with void to avoid throwing a PlatformError and crashing the spawner.
           resume(Effect.void)
         })
       })
@@ -315,7 +324,12 @@ export const make = Effect.gen(function* () {
     signal: NodeJS.Signals,
   ) =>
     Effect.suspend(() => {
-      if (proc.kill(signal)) return Effect.void
+      try {
+        if (proc.kill(signal) || globalThis.process.platform === "win32") return Effect.void
+      } catch (err) {
+        if (globalThis.process.platform === "win32") return Effect.void
+        return Effect.fail(toPlatformError("kill", toError(err), command))
+      }
       return Effect.fail(toPlatformError("kill", new Error("Failed to kill child process"), command))
     })
 

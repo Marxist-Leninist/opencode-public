@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { spawn } from "node:child_process"
+import { killTree } from "../shell/shell"
 import DESCRIPTION from "./notify.txt"
 import * as Tool from "./tool"
 
@@ -51,19 +52,23 @@ function runProcess(
   return new Promise((resolve) => {
     let settled = false
     const child = spawn(cmd, args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true })
-    const timer = setTimeout(() => {
-      if (!settled) {
+    const childExited = () => child.exitCode !== null || child.signalCode !== null
+    const stopChild = () => {
+      void killTree(child, { exited: childExited }).catch(() => {
         try {
           child.kill()
         } catch {}
+      })
+    }
+    const timer = setTimeout(() => {
+      if (!settled) {
+        stopChild()
         settled = true
         resolve({ code: null, stderr: "timeout" })
       }
     }, timeoutMs)
     const onAbort = () => {
-      try {
-        child.kill()
-      } catch {}
+      stopChild()
     }
     signal.addEventListener("abort", onAbort, { once: true })
     let stderr = ""

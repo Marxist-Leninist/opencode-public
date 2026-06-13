@@ -7,24 +7,60 @@ import { spawn, type ChildProcess } from "child_process"
 import { setTimeout as sleep } from "node:timers/promises"
 
 const SIGKILL_TIMEOUT_MS = 200
+const TASKKILL_TIMEOUT_MS = 2_000
 
 const BLACKLIST = new Set(["fish", "nu"])
 const LOGIN = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"])
 const POSIX = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 
-export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
-  const pid = proc.pid
+function runTaskkill(pid: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const done = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(ok)
+    }
+    let killer: ReturnType<typeof spawn> | undefined
+    try {
+      killer = spawn("taskkill", ["/pid", String(pid), "/f", "/t"], {
+        stdio: "ignore",
+        windowsHide: true,
+        detached: true,
+      })
+      // Detach so EPERM from killing elevated children doesn't bubble up
+      killer.unref()
+    } catch {
+      done(false)
+      return
+    }
+    timer = setTimeout(() => {
+      try {
+        killer?.kill()
+      } catch {
+        // taskkill already exited.
+      }
+      done(false)
+    }, TASKKILL_TIMEOUT_MS)
+    killer?.once("exit", (code) => done(code === 0))
+    killer?.once("error", () => done(false))
+  })
+}
+
+export async function killPidTree(pid: number | undefined, opts?: { exited?: () => boolean }): Promise<void> {
   if (!pid || opts?.exited?.()) return
 
   if (process.platform === "win32") {
-    await new Promise<void>((resolve) => {
-      const killer = spawn("taskkill", ["/pid", String(pid), "/f", "/t"], {
-        stdio: "ignore",
-        windowsHide: true,
-      })
-      killer.once("exit", () => resolve())
-      killer.once("error", () => resolve())
-    })
+    const ok = await runTaskkill(pid)
+    if (!ok && !opts?.exited?.()) {
+      try {
+        process.kill(pid)
+      } catch {
+        // Process already exited or cannot be signaled directly.
+      }
+    }
     return
   }
 
@@ -35,10 +71,50 @@ export async function killTree(proc: ChildProcess, opts?: { exited?: () => boole
       process.kill(-pid, "SIGKILL")
     }
   } catch (_e) {
-    proc.kill("SIGTERM")
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch {
+      return
+    }
     await sleep(SIGKILL_TIMEOUT_MS)
     if (!opts?.exited?.()) {
-      proc.kill("SIGKILL")
+      try {
+        process.kill(pid, "SIGKILL")
+      } catch {
+        // Process already exited.
+      }
+    }
+  }
+}
+
+export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
+  const pid = proc.pid
+  if (!pid || opts?.exited?.()) return
+
+  if (process.platform === "win32") {
+    await killPidTree(pid, opts)
+    return
+  }
+
+  try {
+    process.kill(-pid, "SIGTERM")
+    await sleep(SIGKILL_TIMEOUT_MS)
+    if (!opts?.exited?.()) {
+      process.kill(-pid, "SIGKILL")
+    }
+  } catch (_e) {
+    try {
+      proc.kill("SIGTERM")
+    } catch {
+      return
+    }
+    await sleep(SIGKILL_TIMEOUT_MS)
+    if (!opts?.exited?.()) {
+      try {
+        proc.kill("SIGKILL")
+      } catch {
+        // Process already exited.
+      }
     }
   }
 }

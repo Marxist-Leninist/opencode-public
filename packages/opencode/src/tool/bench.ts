@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { spawn } from "node:child_process"
 import { Instance } from "../project/instance"
+import { killTree } from "../shell/shell"
 import DESCRIPTION from "./bench.txt"
 import * as Tool from "./tool"
 
@@ -104,11 +105,19 @@ function runCommandOnce(cmd: string, opts: {
       stderr += d.toString()
       if (stderr.length > 4096) stderr = stderr.slice(-4096)
     })
+    const childExited = () => child.exitCode !== null || child.signalCode !== null
+    const stopChild = () => {
+      void killTree(child, { exited: childExited }).catch(() => {
+        try {
+          child.kill("SIGKILL")
+        } catch {}
+      })
+    }
     const timer = setTimeout(() => {
-      child.kill("SIGKILL")
+      stopChild()
     }, opts.timeoutMs)
-    const onAbort = () => child.kill("SIGKILL")
-    if (opts.signal.aborted) child.kill("SIGKILL")
+    const onAbort = () => stopChild()
+    if (opts.signal.aborted) stopChild()
     else opts.signal.addEventListener("abort", onAbort, { once: true })
     child.on("close", (code) => {
       clearTimeout(timer)

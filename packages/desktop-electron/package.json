@@ -17,10 +17,12 @@
     "build": "electron-vite build",
     "build:fast": "bun ./scripts/prebuild.ts && OPENCODE_FAST_BUILD=true electron-vite build",
     "preview": "electron-vite preview",
+    "preview:fast": "bun run build:fast && OPENCODE_FAST_BUILD=true electron-vite preview",
     "package": "electron-builder --config electron-builder.config.ts",
     "package:mac": "electron-builder --mac --config electron-builder.config.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",
-    "package:win:fast": "bun run build:fast && electron-builder --win --config electron-builder.config.ts",
+    "package:win:fast": "bun run build:fast && OPENCODE_FAST_BUILD=true electron-builder --win --config electron-builder.config.ts",
+    "package:win:dir": "bun run build:fast && OPENCODE_FAST_BUILD=true electron-builder --win --dir --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
     "native:build": "bun install --cwd native"
   },
