@@ -24,7 +24,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { InstanceState } from "@/effect"
 
 const MAX_METADATA_LENGTH = 30_000
-const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 10 * 60 * 1000
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -54,7 +54,9 @@ const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurs
 
 export const Parameters = Schema.Struct({
   command: Schema.String.annotate({ description: "The command to execute" }),
-  timeout: Schema.optional(Schema.Number).annotate({ description: "Optional timeout in milliseconds" }),
+  timeout: Schema.optional(Schema.Number).annotate({
+    description: `Optional timeout in milliseconds. Default ${DEFAULT_TIMEOUT}; use larger values for builds, tests, installs, packaging, deploys, and other long-running commands.`,
+  }),
   workdir: Schema.optional(Schema.String).annotate({
     description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
   }),
@@ -440,6 +442,7 @@ export const BashTool = Tool.define(
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           const handle = yield* spawner.spawn(cmd(input.shell, input.name, input.command, input.cwd, input.env))
+          let exited = false
 
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
@@ -500,7 +503,12 @@ export const BashTool = Tool.define(
           const timeout = Effect.sleep(`${input.timeout + 100} millis`)
 
           const exit = yield* Effect.raceAll([
-            handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
+            handle.exitCode.pipe(
+              Effect.map((code) => {
+                exited = true
+                return { kind: "exit" as const, code }
+              }),
+            ),
             abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
             timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
           ])
@@ -508,7 +516,15 @@ export const BashTool = Tool.define(
           if (exit.kind === "abort" || exit.kind === "timeout") {
             if (exit.kind === "abort") aborted = true
             else expired = true
-            yield* Effect.promise(() => killPidTree(handle.pid).catch(() => {}))
+            yield* Effect.promise(() => killPidTree(handle.pid, { exited: () => exited }).catch(() => {}))
+            yield* Effect.raceAll([
+              handle.exitCode.pipe(
+                Effect.map(() => {
+                  exited = true
+                }),
+              ),
+              Effect.sleep("2 seconds"),
+            ]).pipe(Effect.catchCause(() => Effect.void))
             if (process.platform !== "win32") {
               yield* handle
                 .kill({ forceKillAfter: "3 seconds" })
@@ -523,7 +539,7 @@ export const BashTool = Tool.define(
       const meta: string[] = []
       if (expired) {
         meta.push(
-          `bash tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
+          `bash command timed out after ${input.timeout} ms. If the command is a build, test, install, package, deploy, or other expected long-running task, retry once with a larger timeout value in milliseconds instead of reporting the timeout as the final result.`,
         )
       }
       if (aborted) meta.push("User aborted the command")
@@ -586,6 +602,8 @@ export const BashTool = Tool.define(
             .replaceAll("${os}", process.platform)
             .replaceAll("${shell}", name)
             .replaceAll("${chaining}", chain)
+            .replaceAll("${defaultTimeout}", String(DEFAULT_TIMEOUT))
+            .replaceAll("${defaultTimeoutMinutes}", String(Math.round(DEFAULT_TIMEOUT / 60_000)))
             .replaceAll("${maxLines}", String(limits.maxLines))
             .replaceAll("${maxBytes}", String(limits.maxBytes)),
           parameters: Parameters,
