@@ -15,6 +15,7 @@ import { Log } from "../../util"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config"
 import { errors } from "../error"
+import { Event as ServerEvent } from "../event"
 
 const log = Log.create({ service: "server" })
 
@@ -28,7 +29,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
     q.push(
       JSON.stringify({
         payload: {
-          type: "server.connected",
+          type: ServerEvent.Connected.type,
           properties: {},
         },
       }),
@@ -39,7 +40,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
       q.push(
         JSON.stringify({
           payload: {
-            type: "server.heartbeat",
+            type: ServerEvent.Heartbeat.type,
             properties: {},
           },
         }),

@@ -101,6 +101,30 @@ export async function openapi() {
   return result
 }
 
+export async function openapiWithCodeSamples() {
+  const specs = await openapi()
+  for (const item of Object.values(specs.paths)) {
+    for (const method of ["get", "post", "put", "delete", "patch"] as const) {
+      const operation = item[method]
+      if (!operation?.operationId) continue
+      ;(operation as Record<string, unknown>)["x-codeSamples"] = [
+        {
+          lang: "js",
+          source: [
+            `import { createOpencodeClient } from "@opencode-ai/sdk"`,
+            ``,
+            `const client = createOpencodeClient()`,
+            `await client.${operation.operationId}({`,
+            `  ...`,
+            `})`,
+          ].join("\n"),
+        },
+      ]
+    }
+  }
+  return specs
+}
+
 export let url: URL
 
 export async function listen(opts: {

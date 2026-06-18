@@ -113,6 +113,8 @@ import type {
   QuestionRejectResponses,
   QuestionReplyErrors,
   QuestionReplyResponses,
+  RobotStepErrors,
+  RobotStepResponses,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -142,6 +144,10 @@ import type {
   SessionPromptResponses,
   SessionRevertErrors,
   SessionRevertResponses,
+  SessionSearchAugmentErrors,
+  SessionSearchAugmentResponses,
+  SessionSearchErrors,
+  SessionSearchResponses,
   SessionShareErrors,
   SessionShareResponses,
   SessionShellErrors,
@@ -1606,6 +1612,70 @@ export class Worktree extends HeyApiClient {
   }
 }
 
+export class Search extends HeyApiClient {
+  /**
+   * Search chat history with AI
+   *
+   * Search session history and ask a selected model to summarize the matching chats.
+   */
+  public augment<ThrowOnError extends boolean = false>(
+    parameters?: {
+      query_directory?: string
+      workspace?: string
+      query?: string
+      body_directory?: string
+      limit?: number
+      scanLimit?: number
+      includeArchived?: boolean
+      model?: {
+        providerID: string
+        modelID: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "query" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+            { in: "body", key: "limit" },
+            { in: "body", key: "scanLimit" },
+            { in: "body", key: "includeArchived" },
+            { in: "body", key: "model" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionSearchAugmentResponses,
+      SessionSearchAugmentErrors,
+      ThrowOnError
+    >({
+      url: "/session/search/augment",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -1713,6 +1783,44 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<SessionStatusResponses, SessionStatusErrors, ThrowOnError>({
       url: "/session/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Search chat history
+   *
+   * Search session titles and stored chat message parts for matching text.
+   */
+  public search<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      query: string
+      limit?: number
+      scanLimit?: number
+      includeArchived?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "query" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "scanLimit" },
+            { in: "query", key: "includeArchived" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionSearchResponses, SessionSearchErrors, ThrowOnError>({
+      url: "/session/search",
       ...options,
       ...params,
     })
@@ -2551,6 +2659,11 @@ export class Session2 extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _search?: Search
+  get search2(): Search {
+    return (this._search ??= new Search({ client: this.client }))
   }
 }
 
@@ -3651,6 +3764,66 @@ export class Mcp extends HeyApiClient {
   }
 }
 
+export class Robot extends HeyApiClient {
+  /**
+   * Robot vision-control step
+   *
+   * Takes an FPV image plus current joint state and asks a vision-capable model for the next action. Experimental.
+   */
+  public step<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      goal?: string
+      fpv?: string
+      scene?: string
+      sceneDescription?: string
+      joints?: {
+        base: number
+        shoulder: number
+        elbow: number
+        wrist: number
+        gripper: "open" | "closed"
+      }
+      targetHeld?: boolean
+      model?: {
+        providerID: string
+        modelID: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "goal" },
+            { in: "body", key: "fpv" },
+            { in: "body", key: "scene" },
+            { in: "body", key: "sceneDescription" },
+            { in: "body", key: "joints" },
+            { in: "body", key: "targetHeld" },
+            { in: "body", key: "model" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<RobotStepResponses, RobotStepErrors, ThrowOnError>({
+      url: "/robot/step",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Control extends HeyApiClient {
   /**
    * Get next TUI request
@@ -4423,6 +4596,11 @@ export class OpencodeClient extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _robot?: Robot
+  get robot(): Robot {
+    return (this._robot ??= new Robot({ client: this.client }))
   }
 
   private _tui?: Tui

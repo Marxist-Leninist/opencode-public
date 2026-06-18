@@ -6,6 +6,7 @@ import { Log } from "@/util"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { AsyncQueue } from "@/util/queue"
+import { Event as ServerEvent } from "../../event"
 
 const log = Log.create({ service: "server" })
 
@@ -42,7 +43,7 @@ export const EventRoutes = () =>
 
         q.push(
           JSON.stringify({
-            type: "server.connected",
+            type: ServerEvent.Connected.type,
             properties: {},
           }),
         )
@@ -51,7 +52,7 @@ export const EventRoutes = () =>
         const heartbeat = setInterval(() => {
           q.push(
             JSON.stringify({
-              type: "server.heartbeat",
+              type: ServerEvent.Heartbeat.type,
               properties: {},
             }),
           )

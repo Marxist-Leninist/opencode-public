@@ -4,6 +4,81 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+export type EventServerConnected = {
+  type: "server.connected"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
+export type EventServerHeartbeat = {
+  type: "server.heartbeat"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
+export type EventGlobalDisposed = {
+  type: "global.disposed"
+  properties: {
+    [key: string]: unknown
+  }
+}
+
+export type EventTuiPromptAppend = {
+  type: "tui.prompt.append"
+  properties: {
+    text: string
+  }
+}
+
+export type EventTuiCommandExecute = {
+  type: "tui.command.execute"
+  properties: {
+    command:
+      | "session.list"
+      | "session.new"
+      | "session.share"
+      | "session.interrupt"
+      | "session.compact"
+      | "session.page.up"
+      | "session.page.down"
+      | "session.line.up"
+      | "session.line.down"
+      | "session.half.page.up"
+      | "session.half.page.down"
+      | "session.first"
+      | "session.last"
+      | "prompt.clear"
+      | "prompt.submit"
+      | "agent.cycle"
+      | string
+  }
+}
+
+export type EventTuiToastShow = {
+  type: "tui.toast.show"
+  properties: {
+    title?: string
+    message: string
+    variant: "info" | "success" | "warning" | "error"
+    /**
+     * Duration in milliseconds
+     */
+    duration?: number
+  }
+}
+
+export type EventTuiSessionSelect = {
+  type: "tui.session.select"
+  properties: {
+    /**
+     * Session ID to navigate to
+     */
+    sessionID: string
+  }
+}
+
 export type Project = {
   id: string
   worktree: string
@@ -40,35 +115,6 @@ export type EventServerInstanceDisposed = {
   }
 }
 
-export type EventServerConnected = {
-  type: "server.connected"
-  properties: {
-    [key: string]: unknown
-  }
-}
-
-export type EventGlobalDisposed = {
-  type: "global.disposed"
-  properties: {
-    [key: string]: unknown
-  }
-}
-
-export type EventFileEdited = {
-  type: "file.edited"
-  properties: {
-    file: string
-  }
-}
-
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
-  }
-}
-
 export type EventLspClientDiagnostics = {
   type: "lsp.client.diagnostics"
   properties: {
@@ -81,20 +127,6 @@ export type EventLspUpdated = {
   type: "lsp.updated"
   properties: {
     [key: string]: unknown
-  }
-}
-
-export type EventInstallationUpdated = {
-  type: "installation.updated"
-  properties: {
-    version: string
-  }
-}
-
-export type EventInstallationUpdateAvailable = {
-  type: "installation.update-available"
-  properties: {
-    version: string
   }
 }
 
@@ -230,6 +262,42 @@ export type EventSessionError = {
   }
 }
 
+export type EventInstallationUpdated = {
+  type: "installation.updated"
+  properties: {
+    version: string
+  }
+}
+
+export type EventInstallationUpdateAvailable = {
+  type: "installation.update-available"
+  properties: {
+    version: string
+  }
+}
+
+export type EventProviderAuthUpdated = {
+  type: "provider.auth.updated"
+  properties: {
+    providerID: string
+  }
+}
+
+export type EventFileEdited = {
+  type: "file.edited"
+  properties: {
+    file: string
+  }
+}
+
+export type EventFileWatcherUpdated = {
+  type: "file.watcher.updated"
+  properties: {
+    file: string
+    event: "add" | "change" | "unlink"
+  }
+}
+
 export type QuestionOption = {
   /**
    * Display text (1-5 words, concise)
@@ -359,67 +427,6 @@ export type EventSessionIdle = {
   }
 }
 
-export type EventSessionCompacted = {
-  type: "session.compacted"
-  properties: {
-    sessionID: string
-  }
-}
-
-export type EventTuiPromptAppend = {
-  type: "tui.prompt.append"
-  properties: {
-    text: string
-  }
-}
-
-export type EventTuiCommandExecute = {
-  type: "tui.command.execute"
-  properties: {
-    command:
-      | "session.list"
-      | "session.new"
-      | "session.share"
-      | "session.interrupt"
-      | "session.compact"
-      | "session.page.up"
-      | "session.page.down"
-      | "session.line.up"
-      | "session.line.down"
-      | "session.half.page.up"
-      | "session.half.page.down"
-      | "session.first"
-      | "session.last"
-      | "prompt.clear"
-      | "prompt.submit"
-      | "agent.cycle"
-      | string
-  }
-}
-
-export type EventTuiToastShow = {
-  type: "tui.toast.show"
-  properties: {
-    title?: string
-    message: string
-    variant: "info" | "success" | "warning" | "error"
-    /**
-     * Duration in milliseconds
-     */
-    duration?: number
-  }
-}
-
-export type EventTuiSessionSelect = {
-  type: "tui.session.select"
-  properties: {
-    /**
-     * Session ID to navigate to
-     */
-    sessionID: string
-  }
-}
-
 export type EventMcpToolsChanged = {
   type: "mcp.tools.changed"
   properties: {
@@ -432,6 +439,13 @@ export type EventMcpBrowserOpenFailed = {
   properties: {
     mcpName: string
     url: string
+  }
+}
+
+export type EventSessionCompacted = {
+  type: "session.compacted"
+  properties: {
+    sessionID: string
   }
 }
 
@@ -1109,34 +1123,36 @@ export type GlobalEvent = {
   project?: string
   workspace?: string
   payload:
+    | EventServerConnected
+    | EventServerHeartbeat
+    | EventGlobalDisposed
+    | EventTuiPromptAppend
+    | EventTuiCommandExecute
+    | EventTuiToastShow
+    | EventTuiSessionSelect
     | EventProjectUpdated
     | EventServerInstanceDisposed
-    | EventServerConnected
-    | EventGlobalDisposed
-    | EventFileEdited
-    | EventFileWatcherUpdated
     | EventLspClientDiagnostics
     | EventLspUpdated
-    | EventInstallationUpdated
-    | EventInstallationUpdateAvailable
     | EventMessagePartDelta
     | EventPermissionAsked
     | EventPermissionReplied
     | EventSessionDiff
     | EventSessionError
+    | EventInstallationUpdated
+    | EventInstallationUpdateAvailable
+    | EventProviderAuthUpdated
+    | EventFileEdited
+    | EventFileWatcherUpdated
     | EventQuestionAsked
     | EventQuestionReplied
     | EventQuestionRejected
     | EventTodoUpdated
     | EventSessionStatus
     | EventSessionIdle
-    | EventSessionCompacted
-    | EventTuiPromptAppend
-    | EventTuiCommandExecute
-    | EventTuiToastShow
-    | EventTuiSessionSelect
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
+    | EventSessionCompacted
     | EventCommandExecuted
     | EventVcsBranchUpdated
     | EventWorktreeReady
@@ -1220,6 +1236,15 @@ export type PermissionConfig =
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
       codesearch?: PermissionActionConfig
+      http?: PermissionRuleConfig
+      graphql?: PermissionRuleConfig
+      powershell?: PermissionRuleConfig
+      dotenv?: PermissionRuleConfig
+      open?: PermissionRuleConfig
+      whois?: PermissionRuleConfig
+      dns?: PermissionRuleConfig
+      port_scan?: PermissionRuleConfig
+      tls?: PermissionRuleConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
@@ -1360,7 +1385,7 @@ export type ProviderConfig = {
         output: Array<"text" | "audio" | "image" | "video" | "pdf">
       }
       experimental?: boolean
-      status?: "alpha" | "beta" | "deprecated"
+      status?: "alpha" | "beta" | "deprecated" | "active"
       provider?: {
         npm?: string
         api?: string
@@ -1407,6 +1432,10 @@ export type McpLocalConfig = {
    */
   enabled?: boolean
   /**
+   * Expose this server through deferred MCP search/load tools instead of registering every tool up front.
+   */
+  defer?: boolean
+  /**
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
@@ -1444,6 +1473,10 @@ export type McpRemoteConfig = {
    * Enable or disable the MCP server on startup
    */
   enabled?: boolean
+  /**
+   * Expose this server through deferred MCP search/load tools instead of registering every tool up front.
+   */
+  defer?: boolean
   /**
    * Headers to send with the request
    */
@@ -1622,6 +1655,10 @@ export type Config = {
    * Additional instruction files or patterns to include
    */
   instructions?: Array<string>
+  /**
+   * Inline user preferences to pin into the model system context. Use for stable personal style, workflow, and tool preferences.
+   */
+  preferences?: string | Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -1690,6 +1727,24 @@ export type Config = {
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
+    /**
+     * Expose MCP servers through deferred search/load tools by default instead of registering every MCP tool up front.
+     */
+    defer_mcp_tools?: boolean
+    defer_mcp_tools_search?: {
+      /**
+       * Default deferred MCP search mode. standard is strict token matching, smart is local ranking, augment uses a configured model to rerank.
+       */
+      mode?: "standard" | "smart" | "augment"
+      /**
+       * Model to use for deferred MCP search augmentation, in provider/model format.
+       */
+      model?: string
+      /**
+       * Default number of deferred MCP tool matches to activate per search.
+       */
+      limit?: number
+    }
   }
 }
 
@@ -2048,34 +2103,36 @@ export type File = {
 }
 
 export type Event =
+  | EventServerConnected
+  | EventServerHeartbeat
+  | EventGlobalDisposed
+  | EventTuiPromptAppend
+  | EventTuiCommandExecute
+  | EventTuiToastShow
+  | EventTuiSessionSelect
   | EventProjectUpdated
   | EventServerInstanceDisposed
-  | EventServerConnected
-  | EventGlobalDisposed
-  | EventFileEdited
-  | EventFileWatcherUpdated
   | EventLspClientDiagnostics
   | EventLspUpdated
-  | EventInstallationUpdated
-  | EventInstallationUpdateAvailable
   | EventMessagePartDelta
   | EventPermissionAsked
   | EventPermissionReplied
   | EventSessionDiff
   | EventSessionError
+  | EventInstallationUpdated
+  | EventInstallationUpdateAvailable
+  | EventProviderAuthUpdated
+  | EventFileEdited
+  | EventFileWatcherUpdated
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
   | EventTodoUpdated
   | EventSessionStatus
   | EventSessionIdle
-  | EventSessionCompacted
-  | EventTuiPromptAppend
-  | EventTuiCommandExecute
-  | EventTuiToastShow
-  | EventTuiSessionSelect
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
+  | EventSessionCompacted
   | EventCommandExecuted
   | EventVcsBranchUpdated
   | EventWorktreeReady
@@ -3346,6 +3403,115 @@ export type SessionStatusResponses = {
 }
 
 export type SessionStatusResponse = SessionStatusResponses[keyof SessionStatusResponses]
+
+export type SessionSearchData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    query: string
+    limit?: number
+    scanLimit?: number
+    includeArchived?: boolean
+  }
+  url: "/session/search"
+}
+
+export type SessionSearchErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SessionSearchError = SessionSearchErrors[keyof SessionSearchErrors]
+
+export type SessionSearchResponses = {
+  /**
+   * Search results
+   */
+  200: {
+    query: string
+    results: Array<{
+      session: Session
+      score: number
+      hits: Array<{
+        messageID: string
+        partID?: string
+        role: "user" | "assistant"
+        type: string
+        text: string
+        snippet: string
+        score: number
+        time?: number
+      }>
+    }>
+  }
+}
+
+export type SessionSearchResponse = SessionSearchResponses[keyof SessionSearchResponses]
+
+export type SessionSearchAugmentData = {
+  body?: {
+    query: string
+    directory?: string
+    limit?: number
+    scanLimit?: number
+    includeArchived?: boolean
+    model?: {
+      providerID: string
+      modelID: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/search/augment"
+}
+
+export type SessionSearchAugmentErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SessionSearchAugmentError = SessionSearchAugmentErrors[keyof SessionSearchAugmentErrors]
+
+export type SessionSearchAugmentResponses = {
+  /**
+   * AI-augmented search result
+   */
+  200: {
+    query: string
+    answer: string
+    model: {
+      providerID: string
+      modelID: string
+    }
+    results: Array<{
+      session: Session
+      score: number
+      hits: Array<{
+        messageID: string
+        partID?: string
+        role: "user" | "assistant"
+        type: string
+        text: string
+        snippet: string
+        score: number
+        time?: number
+      }>
+    }>
+    rankedCount?: number
+    source?: "classic" | "rerank" | "semantic"
+  }
+}
+
+export type SessionSearchAugmentResponse = SessionSearchAugmentResponses[keyof SessionSearchAugmentResponses]
 
 export type SessionDeleteData = {
   body?: never
@@ -5019,6 +5185,73 @@ export type McpDisconnectResponses = {
 }
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
+
+export type RobotStepData = {
+  body?: {
+    goal: string
+    /**
+     * Data URL or base64 PNG of the robot's first-person view
+     */
+    fpv?: string
+    /**
+     * Deprecated optional god-eye context image; ignored by this route
+     */
+    scene?: string
+    /**
+     * Text description of the scene for non-vision models (target position, gripper position, distances, etc.)
+     */
+    sceneDescription?: string
+    joints: {
+      base: number
+      shoulder: number
+      elbow: number
+      wrist: number
+      gripper: "open" | "closed"
+    }
+    targetHeld?: boolean
+    model?: {
+      providerID: string
+      modelID: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/robot/step"
+}
+
+export type RobotStepErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type RobotStepError = RobotStepErrors[keyof RobotStepErrors]
+
+export type RobotStepResponses = {
+  /**
+   * Action returned by the vision model
+   */
+  200: {
+    baseDelta: number
+    shoulderDelta: number
+    elbowDelta: number
+    wristDelta: number
+    gripper: "open" | "closed"
+    reasoning: string
+    model: {
+      providerID: string
+      modelID: string
+    }
+    modality: "vision" | "text"
+    supportsImage: boolean
+  }
+}
+
+export type RobotStepResponse = RobotStepResponses[keyof RobotStepResponses]
 
 export type TuiAppendPromptData = {
   body?: {
