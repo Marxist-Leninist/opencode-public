@@ -12,6 +12,12 @@ const root = document.getElementById("root")!
 const lines = ["Just a moment...", "Migrating your database", "This may take a couple of minutes"]
 const delays = [3000, 9000]
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "OpenCode startup failed. Check the main log for details."
+}
+
 render(() => {
   const [step, setStep] = createSignal<InitStep | null>(null)
   const [line, setLine] = createSignal(0)
@@ -21,10 +27,14 @@ render(() => {
 
   const value = createMemo(() => {
     if (phase() === "done") return 100
+    if (phase() === "failed") return 100
     return Math.max(25, Math.min(100, percent()))
   })
 
-  window.api.awaitInitialization((next) => setStep(next as InitStep)).catch(() => undefined)
+  window.api
+    .awaitInitialization((next) => setStep(next as InitStep))
+    .then(() => setStep({ phase: "done" }))
+    .catch((error) => setStep({ phase: "failed", message: getErrorMessage(error) }))
 
   onMount(() => {
     setLine(0)
@@ -54,7 +64,9 @@ render(() => {
   })
 
   const status = createMemo(() => {
+    const current = step()
     if (phase() === "done") return "All done"
+    if (current?.phase === "failed") return current.message
     if (phase() === "sqlite_waiting") return lines[line()]
     return "Just a moment..."
   })

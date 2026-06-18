@@ -54,6 +54,12 @@ export function delay(attempt: number, error?: MessageV2.APIError) {
 export function retryable(error: Err) {
   // context overflow errors should not be retried
   if (MessageV2.ContextOverflowError.isInstance(error)) return undefined
+
+  const msg = error.data?.message
+  if (typeof msg === "string" && msg.toLowerCase().includes("sse read timed out")) {
+    return "SSE stream idle timed out"
+  }
+
   if (MessageV2.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,
@@ -64,7 +70,6 @@ export function retryable(error: Err) {
   }
 
   // Check for rate limit patterns in plain text error messages
-  const msg = error.data?.message
   if (typeof msg === "string") {
     const lower = msg.toLowerCase()
     if (

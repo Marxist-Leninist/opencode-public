@@ -1,4 +1,8 @@
-export type InitStep = { phase: "server_waiting" } | { phase: "sqlite_waiting" } | { phase: "done" }
+export type InitStep =
+  | { phase: "server_waiting" }
+  | { phase: "sqlite_waiting" }
+  | { phase: "done" }
+  | { phase: "failed"; message: string }
 
 export type ServerReadyData = {
   url: string

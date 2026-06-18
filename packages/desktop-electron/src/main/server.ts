@@ -48,7 +48,7 @@ export async function spawnLocalServer(hostname: string, port: number, password:
     hostname,
     username: "opencode",
     password,
-    cors: ["oc://renderer"],
+    cors: rendererCorsOrigins(),
   })
 
   const wait = (async () => {
@@ -65,6 +65,24 @@ export async function spawnLocalServer(hostname: string, port: number, password:
   })()
 
   return { listener, health: { wait } }
+}
+
+function rendererCorsOrigins() {
+  const origins = new Set(["oc://renderer"])
+
+  if (!app.isPackaged) {
+    origins.add("http://localhost:5173")
+    origins.add("http://127.0.0.1:5173")
+
+    const devUrl = process.env.ELECTRON_RENDERER_URL
+    if (devUrl) {
+      try {
+        origins.add(new URL(devUrl).origin)
+      } catch {}
+    }
+  }
+
+  return [...origins]
 }
 
 function prepareServerEnv(password: string, lowResource: boolean) {

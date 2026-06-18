@@ -27,23 +27,29 @@ const channel = (() => {
 })()
 
 const fastBuild = process.env.OPENCODE_FAST_BUILD === "true" || process.env.OPENCODE_FAST_BUILD === "1"
+const dirTarget = process.env.OPENCODE_DIR_TARGET === "true" || process.env.OPENCODE_DIR_TARGET === "1"
 
 const getBase = (): Configuration => ({
   artifactName: "opencode-electron-${os}-${arch}.${ext}",
   // fast local builds skip LZMA compression entirely — installer is bigger but packaging is minutes faster
   compression: fastBuild ? "store" : undefined,
+  // Local --dir builds are only used to smoke-test/reopen the app. Avoid the slow asar packing path,
+  // which can leave electron-builder running forever on Windows while the splash screen looks alive.
+  asar: dirTarget ? false : undefined,
   directories: {
     output: "dist",
     buildResources: "resources",
   },
   files: ["out/**/*", "resources/**/*"],
-  extraResources: [
-    {
-      from: "native/",
-      to: "native/",
-      filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
-    },
-  ],
+  extraResources: dirTarget
+    ? []
+    : [
+        {
+          from: "native/",
+          to: "native/",
+          filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
+        },
+      ],
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
@@ -67,7 +73,7 @@ const getBase = (): Configuration => ({
     signtoolOptions: {
       sign: signWindows,
     },
-    target: ["nsis"],
+    target: dirTarget ? ["dir"] : ["nsis"],
   },
   nsis: {
     oneClick: false,

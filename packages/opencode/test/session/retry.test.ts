@@ -169,6 +169,11 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error)).toBe(msg)
   })
 
+  test("retries provider SSE idle timeout errors", () => {
+    const error = wrap("SSE read timed out")
+    expect(SessionRetry.retryable(error)).toBe("SSE stream idle timed out")
+  })
+
   test("does not retry context overflow errors", () => {
     const error = new MessageV2.ContextOverflowError({
       message: "Input exceeds context window of this model",

@@ -30,6 +30,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 
 const log = Log.create({ service: "provider" })
+const SSE_IDLE_HEARTBEAT = new TextEncoder().encode(": opencode keepalive\n\n")
 
 function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
@@ -37,33 +38,44 @@ function shouldUseCopilotResponsesApi(modelID: string): boolean {
   return Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")
 }
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
+export function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
+  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | undefined
+  function read(): Promise<ReadableStreamReadResult<Uint8Array>> {
+    if (pending) return pending
+    pending = reader.read().finally(() => {
+      pending = undefined
+    }) as Promise<ReadableStreamReadResult<Uint8Array>>
+    return pending
+  }
+  function readWithIdleTimeout() {
+    return new Promise<ReadableStreamReadResult<Uint8Array> | "timeout">((resolve, reject) => {
+      const timer = setTimeout(() => resolve("timeout"), ms)
+      read().then(
+        (part) => {
+          clearTimeout(timer)
+          resolve(part)
+        },
+        (err) => {
+          clearTimeout(timer)
+          reject(err)
+        },
+      )
+    })
+  }
+
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
-      const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-        const id = setTimeout(() => {
-          const err = new Error("SSE read timed out")
-          ctl.abort(err)
-          void reader.cancel(err)
-          reject(err)
-        }, ms)
+      const part = await readWithIdleTimeout()
 
-        reader.read().then(
-          (part) => {
-            clearTimeout(id)
-            resolve(part)
-          },
-          (err) => {
-            clearTimeout(id)
-            reject(err)
-          },
-        )
-      })
+      if (part === "timeout") {
+        ctrl.enqueue(SSE_IDLE_HEARTBEAT.slice())
+        return
+      }
 
       if (part.done) {
         ctrl.close()
@@ -74,7 +86,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
     },
     async cancel(reason) {
       ctl.abort(reason)
-      await reader.cancel(reason)
+      await reader.cancel(reason).catch(() => {})
     },
   })
 

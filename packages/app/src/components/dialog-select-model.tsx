@@ -14,6 +14,12 @@ import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { isDefaultVisibleModel } from "@/context/models"
 
+const MODEL_POPOVER_ROW_LIMIT = 120
+const MODEL_DIALOG_ROW_LIMIT = 240
+const MODEL_INITIAL_CANDIDATE_MULTIPLIER = 3
+const MODEL_SEARCH_CANDIDATE_MULTIPLIER = 8
+const MODEL_SEARCH_MIN_CANDIDATES = 600
+
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
 
@@ -25,6 +31,7 @@ const defaultVisibleRank = (model: { id: string; provider: { id: string } }) => 
 }
 
 type ModelState = ReturnType<typeof useLocal>["model"]
+type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const ModelList: Component<{
   provider?: string
@@ -32,16 +39,100 @@ const ModelList: Component<{
   onSelect: () => void
   action?: JSX.Element
   model?: ModelState
+  rowLimit?: number
+  tooltips?: boolean
+  compactInitial?: boolean
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
 
-  const models = createMemo(() =>
-    model
-      .list()
-      .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
-      .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
-  )
+  const modelKey = (item: ModelItem) => `${item.provider.id}:${item.id}`
+  const matchesProvider = (item: ModelItem) => !props.provider || item.provider.id === props.provider
+  const isVisible = (item: ModelItem) => model.visible({ modelID: item.id, providerID: item.provider.id })
+
+  const fullModels = createMemo(() => model.list().filter((item) => matchesProvider(item) && isVisible(item)))
+
+  const collectVisibleModels = (limit: number, predicate?: (item: ModelItem) => boolean) => {
+    const items: ModelItem[] = []
+    for (const item of model.list()) {
+      if (items.length >= limit) break
+      if (!matchesProvider(item) || !isVisible(item)) continue
+      if (predicate && !predicate(item)) continue
+      items.push(item)
+    }
+    return items
+  }
+
+  const initialModels = createMemo(() => {
+    const limit = Math.max(
+      props.rowLimit ?? MODEL_DIALOG_ROW_LIMIT,
+      (props.rowLimit ?? MODEL_POPOVER_ROW_LIMIT) * MODEL_INITIAL_CANDIDATE_MULTIPLIER,
+    )
+    const seen = new Set<string>()
+    const items: ModelItem[] = []
+
+    const add = (item: ModelItem | undefined) => {
+      if (!item || !matchesProvider(item) || !isVisible(item)) return
+      const key = modelKey(item)
+      if (seen.has(key)) return
+      seen.add(key)
+      items.push(item)
+    }
+
+    add(model.current())
+    for (const item of model.recent()) add(item)
+
+    for (const item of model.list()) {
+      if (items.length >= limit) break
+      if (defaultVisibleRank(item) < 2) add(item)
+    }
+
+    for (const item of model.list()) {
+      if (items.length >= limit) break
+      if (popularProviders.includes(item.provider.id)) add(item)
+    }
+
+    for (const item of model.list()) {
+      if (items.length >= limit) break
+      add(item)
+    }
+
+    return items
+  })
+
+  const searchedModels = (filter: string) => {
+    const needle = filter.trim().toLowerCase()
+    const limit = Math.max(
+      (props.rowLimit ?? MODEL_DIALOG_ROW_LIMIT) * MODEL_SEARCH_CANDIDATE_MULTIPLIER,
+      MODEL_SEARCH_MIN_CANDIDATES,
+    )
+    const matches = collectVisibleModels(limit, (item) =>
+      `${item.provider.name} ${item.name} ${item.id}`.toLowerCase().includes(needle),
+    )
+    if (matches.length > 0) return matches
+
+    // Keep fuzzy-sort bounded even for typo/no-substring queries on huge provider catalogs.
+    return collectVisibleModels(limit)
+  }
+
+  const models = (filter: string) => {
+    const started = performance.now()
+    const compact = props.compactInitial !== false
+    const query = filter.trim()
+    const items = compact ? (query === "" ? initialModels() : searchedModels(query)) : fullModels()
+    const elapsed = Math.round(performance.now() - started)
+
+    if (import.meta.env.DEV && compact) {
+      console.info("[model-picker] candidates", {
+        compact,
+        query: query ? "search" : "initial",
+        count: items.length,
+        ms: elapsed,
+      })
+    }
+
+    return items
+  }
 
   return (
     <List
@@ -52,6 +143,7 @@ const ModelList: Component<{
       items={models}
       current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
+      maxItems={props.rowLimit}
       sortBy={(a, b) => defaultVisibleRank(a) - defaultVisibleRank(b) || a.name.localeCompare(b.name)}
       groupBy={(x) => x.provider.name}
       sortGroupsBy={(a, b) => {
@@ -61,16 +153,20 @@ const ModelList: Component<{
         if (!popularProviders.includes(aProvider) && popularProviders.includes(bProvider)) return 1
         return popularProviders.indexOf(aProvider) - popularProviders.indexOf(bProvider)
       }}
-      itemWrapper={(item, node) => (
-        <Tooltip
-          class="w-full"
-          placement="right-start"
-          gutter={12}
-          value={<ModelTooltip model={item} latest={item.latest} free={isFree(item.provider.id, item.cost)} />}
-        >
-          {node}
-        </Tooltip>
-      )}
+      itemWrapper={
+        props.tooltips === false
+          ? undefined
+          : (item, node) => (
+              <Tooltip
+                class="w-full"
+                placement="right-start"
+                gutter={12}
+                value={<ModelTooltip model={item} latest={item.latest} free={isFree(item.provider.id, item.cost)} />}
+              >
+                {node}
+              </Tooltip>
+            )
+      }
       onSelect={(x) => {
         model.set(x ? { modelID: x.id, providerID: x.provider.id } : undefined, {
           recent: true,
@@ -172,6 +268,8 @@ export function ModelSelectorPopover(props: {
             provider={props.provider}
             model={props.model}
             onSelect={() => close("select")}
+            rowLimit={MODEL_POPOVER_ROW_LIMIT}
+            tooltips={false}
             class="p-1"
             action={
               <div class="flex items-center gap-1">
@@ -229,7 +327,12 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
         </Button>
       }
     >
-      <ModelList provider={props.provider} model={props.model} onSelect={() => dialog.close()} />
+      <ModelList
+        provider={props.provider}
+        model={props.model}
+        onSelect={() => dialog.close()}
+        rowLimit={MODEL_DIALOG_ROW_LIMIT}
+      />
       <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
         {language.t("dialog.model.manage")}
       </Button>

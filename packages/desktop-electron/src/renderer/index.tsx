@@ -16,13 +16,14 @@ import {
 } from "@opencode-ai/app"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import { MemoryRouter } from "@solidjs/router"
-import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
 import { webviewZoom } from "./webview-zoom"
 import "./styles.css"
 import { useTheme } from "@opencode-ai/ui/theme"
+import { Splash } from "@opencode-ai/ui/logo"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -251,9 +252,82 @@ window.api.onMenuCommand((id) => {
 })
 listenForDeepLinks()
 
+window.addEventListener("error", (event) => {
+  console.error("[desktop-renderer] uncaught error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    error: event.error,
+  })
+})
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("[desktop-renderer] unhandled rejection", {
+    reason: event.reason,
+  })
+})
+
+document.addEventListener("visibilitychange", () => {
+  console.info("[desktop-renderer] visibility", {
+    state: document.visibilityState,
+    hidden: document.hidden,
+  })
+})
+
+type BootResource = {
+  name: string
+  loading: boolean
+  state: string
+}
+
+function loadBootResource<T>(name: string, run: () => Promise<T>) {
+  const start = performance.now()
+  console.info(`[desktop-renderer] ${name}:start`)
+  return run().then(
+    (value) => {
+      console.info(`[desktop-renderer] ${name}:ready`, { ms: Math.round(performance.now() - start) })
+      return value
+    },
+    (error) => {
+      console.error(`[desktop-renderer] ${name}:failed`, error)
+      throw error
+    },
+  )
+}
+
+function DesktopBootFallback(props: { resources: () => BootResource[] }) {
+  const [slow, setSlow] = createSignal(false)
+
+  onMount(() => {
+    const timer = setTimeout(() => {
+      setSlow(true)
+      console.warn("[desktop-renderer] boot gate still pending", {
+        resources: props.resources(),
+      })
+    }, 4_000)
+    onCleanup(() => clearTimeout(timer))
+  })
+
+  const pending = () => props.resources().filter((item) => item.loading)
+
+  return (
+    <div class="h-dvh w-screen bg-background-base flex flex-col items-center justify-center gap-5 text-text-weak">
+      <Splash class="w-16 h-20 opacity-40 animate-pulse" />
+      <div class="h-8 text-12-regular" aria-live="polite">
+        <Show when={slow()} fallback={<span>Starting OpenCode...</span>}>
+          <span>Still starting {pending().map((item) => item.name).join(", ") || "renderer"}...</span>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
 render(() => {
   const platform = createPlatform()
-  const [windowConfig] = createResource(() => window.api.getWindowConfig().catch(() => ({ updaterEnabled: false })))
+  const [windowConfig] = createResource(() =>
+    loadBootResource("windowConfig", () => window.api.getWindowConfig().catch(() => ({ updaterEnabled: false }))),
+  )
   const loadLocale = async () => {
     const current = await platform.storage?.("opencode.global.dat").getItem("language")
     const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
@@ -266,17 +340,37 @@ render(() => {
     return next satisfies Locale
   }
 
-  const [windowCount] = createResource(() => window.api.getWindowCount())
+  const [windowCount] = createResource(() => loadBootResource("windowCount", () => window.api.getWindowCount()))
 
   // Fetch sidecar credentials (available immediately, before health check)
-  const [sidecar] = createResource(() => window.api.awaitInitialization(() => undefined))
+  const [sidecar] = createResource(() =>
+    loadBootResource("sidecar", () => window.api.awaitInitialization(() => undefined)),
+  )
 
   const [defaultServer] = createResource(() =>
-    platform.getDefaultServer?.().then((url) => {
+    loadBootResource("defaultServer", async () => {
+      const url = await platform.getDefaultServer?.()
       if (url) return ServerConnection.key({ type: "http", http: { url } })
     }),
   )
-  const [locale] = createResource(loadLocale)
+  const [locale] = createResource(() => loadBootResource("locale", loadLocale))
+  const bootResources = () => [
+    { name: "defaultServer", loading: defaultServer.loading, state: defaultServer.state },
+    { name: "sidecar", loading: sidecar.loading, state: sidecar.state },
+    { name: "windowConfig", loading: windowConfig.loading, state: windowConfig.state },
+    { name: "windowCount", loading: windowCount.loading, state: windowCount.state },
+    { name: "locale", loading: locale.loading, state: locale.state },
+  ]
+  const bootReady = () => bootResources().every((item) => !item.loading)
+
+  let loggedReady = false
+  createEffect(() => {
+    if (!bootReady() || loggedReady) return
+    loggedReady = true
+    console.info("[desktop-renderer] boot gate ready", {
+      resources: bootResources(),
+    })
+  })
 
   const servers = () => {
     const data = sidecar()
@@ -331,13 +425,8 @@ render(() => {
     <PlatformProvider value={platform}>
       <AppBaseProviders locale={locale.latest}>
         <Show
-          when={
-            !defaultServer.loading &&
-            !sidecar.loading &&
-            !windowConfig.loading &&
-            !windowCount.loading &&
-            !locale.loading
-          }
+          when={bootReady()}
+          fallback={<DesktopBootFallback resources={bootResources} />}
         >
           {(_) => {
             return (

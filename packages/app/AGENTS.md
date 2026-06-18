@@ -5,6 +5,8 @@
 ## Local Dev
 
 - `opencode dev web` proxies `https://app.opencode.ai`, so local UI/CSS changes will not show there.
+- Fast local UI loop: from the repo root, run `bun run dev:ui`. It starts the backend on `4096`
+  and the Vite frontend on `4444`, where frontend edits hot-reload without rebuilding Electron.
 - For local UI changes, run the backend and app dev servers separately.
 - Backend (from `packages/opencode`): `bun run --conditions=browser ./src/index.ts serve --port 4096`
 - App (from `packages/app`): `bun dev -- --port 4444`

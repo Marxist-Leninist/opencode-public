@@ -19,8 +19,9 @@ const popularProviderSet = new Set(popularProviders)
 
 // user-configured providers: opencode.json `provider` block ("config"), custom npm/plugin
 // providers ("custom"), and env-key providers ("env"). Catalog-only entries are "api".
+const configuredProviderSources = new Set(["config", "custom", "env"])
 const isConfiguredSource = (source: string | undefined) =>
-  source === "config" || source === "custom" || source === "env"
+  source !== undefined && configuredProviderSources.has(source)
 
 export function useProviders() {
   const globalSync = useGlobalSync()

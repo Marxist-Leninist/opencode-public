@@ -57,6 +57,30 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   const cost = createMemo(() => {
     return usd().format(metrics().totalCost)
   })
+  const compact = createMemo(
+    () =>
+      new Intl.NumberFormat(language.intl(), {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }),
+  )
+
+  const exact = (value: number | null | undefined) => {
+    if (value === undefined || value === null) return "—"
+    return value.toLocaleString(language.intl())
+  }
+
+  const compactNumber = (value: number | null | undefined) => {
+    if (value === undefined || value === null) return "—"
+    return compact().format(value)
+  }
+
+  const tokenLabel = createMemo(() => {
+    const ctx = context()
+    if (!ctx) return "0"
+    if (!ctx.limit) return compactNumber(ctx.total)
+    return `${compactNumber(ctx.total)} / ${compactNumber(ctx.limit)}`
+  })
 
   const openContext = () => {
     if (!params.id) return
@@ -88,8 +112,16 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
               <span class="text-text-invert-base">{language.t("context.usage.tokens")}</span>
             </div>
             <div class="flex items-center gap-2">
+              <span class="text-text-invert-strong">{exact(ctx().limit)}</span>
+              <span class="text-text-invert-base">{language.t("context.stats.limit")}</span>
+            </div>
+            <div class="flex items-center gap-2">
               <span class="text-text-invert-strong">{ctx().usage ?? 0}%</span>
               <span class="text-text-invert-base">{language.t("context.usage.usage")}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-text-invert-strong">{exact(ctx().input)}</span>
+              <span class="text-text-invert-base">{language.t("context.stats.inputTokens")}</span>
             </div>
           </>
         )}
@@ -110,11 +142,13 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
             <Button
               type="button"
               variant="ghost"
-              class="size-6"
+              size="small"
+              class="h-6 px-2 gap-1.5 rounded-md tabular-nums"
               onClick={openContext}
-              aria-label={language.t("context.usage.view")}
+              aria-label={`${language.t("context.usage.view")}: ${tokenLabel()}`}
             >
               {circle()}
+              <span class="text-12-medium text-text-base">{tokenLabel()}</span>
             </Button>
           </Match>
         </Switch>

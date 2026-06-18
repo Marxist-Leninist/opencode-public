@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import { existsSync } from "node:fs"
 import { createServer } from "node:net"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type { Event } from "electron"
 import { app, BrowserWindow, dialog } from "electron"
 import pkg from "electron-updater"
@@ -11,9 +11,12 @@ import pkg from "electron-updater"
 import contextMenu from "electron-context-menu"
 contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
-// on macOS apps run in `/` which can cause issues with ripgrep
+// macOS packaged apps can launch from `/`, which causes issues with ripgrep.
+// Dev launches can pin a project directory explicitly without changing shells.
 try {
-  process.chdir(homedir())
+  const startupCwd = process.env.OPENCODE_DESKTOP_CWD?.trim()
+  if (startupCwd && existsSync(startupCwd)) process.chdir(resolve(startupCwd))
+  else if (process.platform === "darwin" && process.cwd() === "/") process.chdir(homedir())
 } catch {}
 
 process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
@@ -63,6 +66,8 @@ const pendingDeepLinks: string[] = []
 
 const serverReady = defer<ServerReadyData>()
 const logger = initLogging()
+const STARTUP_TIMEOUT_MS = readPositiveIntEnv("OPENCODE_DESKTOP_STARTUP_TIMEOUT_MS", 2 * 60 * 1000)
+const LOADING_COMPLETE_TIMEOUT_MS = readPositiveIntEnv("OPENCODE_DESKTOP_LOADING_COMPLETE_TIMEOUT_MS", 5_000)
 
 logger.log("app starting", {
   version: app.getVersion(),
@@ -153,6 +158,7 @@ async function initialize() {
   const needsMigration = !sqliteFileExists()
   const sqliteDone = needsMigration ? defer<void>() : undefined
   let overlay: BrowserWindow | null = null
+  let startupFailed = false
 
   const port = await getSidecarPort()
   const hostname = "127.0.0.1"
@@ -173,7 +179,7 @@ async function initialize() {
       const { Database, JsonMigration } = await import("virtual:opencode-server")
       await JsonMigration.run(drizzle({ client: Database.Client().$client }), {
         progress: (event: { current: number; total: number }) => {
-          const percent = Math.round(event.current / event.total) * 100
+          const percent = Math.round((event.current / event.total) * 100)
           initEmitter.emit("sqlite", { type: "InProgress", value: percent })
         },
       })
@@ -188,6 +194,10 @@ async function initialize() {
 
     logger.log("spawning sidecar", { url })
     const { listener, health } = await spawnLocalServer(hostname, port, password)
+    if (startupFailed) {
+      listener.stop()
+      return
+    }
     server = listener
     serverReady.resolve({
       url,
@@ -206,26 +216,57 @@ async function initialize() {
 
     logger.log("loading task finished")
   })()
+  const boundedLoadingTask = withTimeout(
+    loadingTask,
+    STARTUP_TIMEOUT_MS,
+    `OpenCode startup timed out after ${STARTUP_TIMEOUT_MS}ms`,
+  )
 
-  if (needsMigration) {
-    const show = await Promise.race([loadingTask.then(() => false), delay(1_000).then(() => true)])
-    if (show) {
-      overlay = createLoadingWindow()
-      await delay(1_000)
+  try {
+    if (needsMigration) {
+      const show = await Promise.race([
+        boundedLoadingTask.then(
+          () => false,
+          () => true,
+        ),
+        delay(1_000).then(() => true),
+      ])
+      if (show) {
+        overlay = createLoadingWindow()
+        await delay(1_000)
+      }
+    }
+
+    await boundedLoadingTask
+    setInitStep({ phase: "done" })
+
+    if (overlay) {
+      const complete = await Promise.race([
+        loadingComplete.promise.then(() => true),
+        delay(LOADING_COMPLETE_TIMEOUT_MS).then(() => false),
+      ])
+      if (!complete) {
+        logger.log("loading window completion timed out; continuing startup", {
+          timeoutMs: LOADING_COMPLETE_TIMEOUT_MS,
+        })
+      }
+    }
+
+    mainWindow = createMainWindow()
+    wireMenu()
+
+    overlay?.close()
+  } catch (cause) {
+    const error = toError(cause)
+    startupFailed = true
+    killSidecar()
+    logger.error("startup failed", error)
+    serverReady.reject(error)
+    setInitStep({ phase: "failed", message: error.message })
+    if (!overlay || overlay.isDestroyed()) {
+      dialog.showErrorBox("OpenCode failed to start", error.message)
     }
   }
-
-  await loadingTask
-  setInitStep({ phase: "done" })
-
-  if (overlay) {
-    await loadingComplete.promise
-  }
-
-  mainWindow = createMainWindow()
-  wireMenu()
-
-  overlay?.close()
 }
 
 function wireMenu() {
@@ -451,6 +492,33 @@ async function checkForUpdates(alertOnFail: boolean) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function readPositiveIntEnv(name: string, fallback: number) {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function toError(cause: unknown) {
+  if (cause instanceof Error) return cause
+  if (typeof cause === "string" && cause) return new Error(cause)
+  return new Error("OpenCode startup failed")
 }
 
 function defer<T>() {

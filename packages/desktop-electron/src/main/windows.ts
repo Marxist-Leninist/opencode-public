@@ -1,5 +1,6 @@
 import windowState from "electron-window-state"
 import { app, BrowserWindow, net, nativeImage, nativeTheme, protocol } from "electron"
+import log from "electron-log/main.js"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { TitlebarTheme } from "../preload/types"
@@ -114,6 +115,7 @@ export function createMainWindow() {
   })
 
   state.manage(win)
+  wireDiagnostics(win, "main")
   loadWindow(win, "index.html")
   wireZoom(win)
 
@@ -151,6 +153,7 @@ export function createLoadingWindow() {
   })
 
   loadWindow(win, "loading.html")
+  wireDiagnostics(win, "loading")
 
   return win
 }
@@ -179,11 +182,80 @@ function loadWindow(win: BrowserWindow, html: string) {
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
     const url = new URL(html, devUrl)
+    log.log("loading renderer window", { html, url: url.toString() })
     void win.loadURL(url.toString())
     return
   }
 
-  void win.loadURL(`${rendererProtocol}://${rendererHost}/${html}`)
+  const url = `${rendererProtocol}://${rendererHost}/${html}`
+  log.log("loading renderer window", { html, url })
+  void win.loadURL(url)
+}
+
+function wireDiagnostics(win: BrowserWindow, label: string) {
+  const snapshot = () => ({
+    window: label,
+    destroyed: win.isDestroyed(),
+    visible: !win.isDestroyed() && win.isVisible(),
+    minimized: !win.isDestroyed() && win.isMinimized(),
+    focused: !win.isDestroyed() && win.isFocused(),
+    url: !win.isDestroyed() ? win.webContents.getURL() : undefined,
+    bounds: !win.isDestroyed() ? win.getBounds() : undefined,
+  })
+
+  const logWindowEvent = (event: string) => {
+    log.log(`renderer window ${event}`, snapshot())
+  }
+
+  for (const event of ["ready-to-show", "show", "hide", "minimize", "restore", "focus", "blur", "close", "closed"]) {
+    win.on(event as never, () => logWindowEvent(event))
+  }
+
+  win.on("unresponsive", () => {
+    log.warn("renderer window became unresponsive", { window: label })
+  })
+  win.on("responsive", () => {
+    log.log("renderer window responsive", { window: label })
+  })
+  win.webContents.on("render-process-gone", (_event, details) => {
+    log.error("renderer process gone", { window: label, details })
+    if (label !== "main" || win.isDestroyed()) return
+    setTimeout(() => {
+      if (win.isDestroyed()) return
+      log.warn("reloading main window after renderer process gone", snapshot())
+      loadWindow(win, "index.html")
+      win.show()
+    }, 500)
+  })
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    log.error("renderer load failed", {
+      window: label,
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame,
+    })
+    if (label !== "main" || !isMainFrame || win.isDestroyed()) return
+    setTimeout(() => {
+      if (win.isDestroyed()) return
+      log.warn("reloading main window after failed load", snapshot())
+      loadWindow(win, "index.html")
+      win.show()
+    }, 1_000)
+  })
+  win.webContents.on("did-finish-load", () => {
+    log.log("renderer load finished", { window: label, url: win.webContents.getURL() })
+  })
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const levelName = ["verbose", "info", "warning", "error"][level] ?? String(level)
+    log.log("renderer console", {
+      window: label,
+      level: levelName,
+      message,
+      line,
+      sourceId,
+    })
+  })
 }
 function wireZoom(win: BrowserWindow) {
   win.webContents.setZoomFactor(1)

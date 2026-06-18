@@ -33,6 +33,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useSettings } from "@/context/settings"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
@@ -99,6 +100,8 @@ const EXAMPLES = [
 ] as const
 
 const NON_EMPTY_TEXT = /[^\s\u200B]/
+type FollowupMode = "queue" | "steer"
+const FOLLOWUP_MODES: FollowupMode[] = ["queue", "steer"]
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -115,6 +118,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const settings = useSettings()
   const { params, tabs, view } = useSessionLayout()
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -277,6 +281,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const buttons = createMemo(() => motion(buttonsSpring()))
   const shell = createMemo(() => motion(1 - buttonsSpring()))
   const control = createMemo(() => ({ height: "28px", ...buttons() }))
+  const followupOptions = createMemo<FollowupMode[]>(() => FOLLOWUP_MODES)
+  const showFollowupMode = createMemo(() => !!params.id && working() && store.mode === "normal")
 
   const commentCount = createMemo(() => {
     if (store.mode === "shell") return 0
@@ -1496,6 +1502,34 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         variant="ghost"
                       />
                     </TooltipKeybind>
+                  </div>
+                </Show>
+                <Show when={showFollowupMode()}>
+                  <div
+                    data-component="prompt-followup-control"
+                    style={agentsShouldFadeIn() ? { animation: "fade-in 0.3s" } : undefined}
+                  >
+                    <Tooltip
+                      placement="top"
+                      value={language.t("settings.general.row.followup.description")}
+                    >
+                      <Select
+                        size="normal"
+                        options={followupOptions()}
+                        current={settings.general.followup()}
+                        label={(option) => language.t(`settings.general.row.followup.option.${option}`)}
+                        onSelect={(option) => {
+                          if (!option) return
+                          settings.general.setFollowup(option)
+                          restoreFocus()
+                        }}
+                        class="capitalize max-w-[120px] text-text-base"
+                        valueClass="truncate text-13-regular text-text-base"
+                        triggerStyle={control()}
+                        triggerProps={{ "data-action": "prompt-followup-mode" }}
+                        variant="ghost"
+                      />
+                    </Tooltip>
                   </div>
                 </Show>
                 <Show when={!providersLoading()}>

@@ -12,6 +12,7 @@ export interface FilteredListProps<T> {
   groupBy?: (x: T) => string
   sortBy?: (a: T, b: T) => number
   sortGroupsBy?: (a: { category: string; items: T[] }, b: { category: string; items: T[] }) => number
+  maxItems?: number
   onSelect?: (value: T | undefined, index: number) => void
   noInitialSelection?: boolean
 }
@@ -19,15 +20,30 @@ export interface FilteredListProps<T> {
 export function useFilteredList<T>(props: FilteredListProps<T>) {
   const [store, setStore] = createStore<{ filter: string }>({ filter: "" })
 
-  type Group = { category: string; items: [T, ...T[]] }
+  type Group = { category: string; items: T[] }
   const empty: Group[] = []
+
+  const limitGroups = (groups: Group[], maxItems: number | undefined) => {
+    if (!maxItems || maxItems < 1) return groups
+
+    let remaining = maxItems
+    const limited: Group[] = []
+    for (const group of groups) {
+      if (remaining <= 0) break
+      const items = group.items.slice(0, remaining)
+      if (items.length > 0) limited.push({ category: group.category, items })
+      remaining -= items.length
+    }
+    return limited
+  }
 
   const [grouped, { refetch }] = createResource(
     () => ({
       filter: store.filter,
       items: typeof props.items === "function" ? props.items(store.filter) : props.items,
+      maxItems: props.maxItems,
     }),
-    async ({ filter, items }) => {
+    async ({ filter, items, maxItems }) => {
       const query = filter ?? ""
       const needle = query.toLowerCase()
       const all = (await Promise.resolve(items)) || []
@@ -45,7 +61,7 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
         map(([k, v]) => ({ category: k, items: props.sortBy ? v.sort(props.sortBy) : v })),
         (groups) => (props.sortGroupsBy ? groups.sort(props.sortGroupsBy) : groups),
       )
-      return result
+      return limitGroups(result, maxItems)
     },
     { initialValue: empty },
   )
