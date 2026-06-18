@@ -1,46 +1,11 @@
 #!/usr/bin/env bun
-import { fileURLToPath } from "url"
-
-const dir = fileURLToPath(new URL("..", import.meta.url))
-process.chdir(dir)
-
 import { $ } from "bun"
-import path from "path"
 
-import { createClient } from "@hey-api/openapi-ts"
-import { Server } from "../../../opencode/src/server/server"
+import { generateSdk, repoRoot, sdkDir } from "./generate"
 
-await Bun.write(path.join(dir, "openapi.json"), JSON.stringify(await Server.openapiWithCodeSamples(), null, 2))
-
-await createClient({
-  input: "./openapi.json",
-  output: {
-    path: "./src/v2/gen",
-    tsConfigPath: path.join(dir, "tsconfig.json"),
-    clean: true,
-  },
-  plugins: [
-    {
-      name: "@hey-api/typescript",
-      exportFromIndex: false,
-    },
-    {
-      name: "@hey-api/sdk",
-      instance: "OpencodeClient",
-      exportFromIndex: false,
-      auth: false,
-      paramsStructure: "flat",
-    },
-    {
-      name: "@hey-api/client-fetch",
-      exportFromIndex: false,
-      baseUrl: "http://localhost:4096",
-    },
-  ],
-})
-
-await $`bun prettier --write src/gen`
-await $`bun prettier --write src/v2`
+await generateSdk()
+process.chdir(repoRoot)
+await $`bun prettier --write packages/sdk/js/src/gen`
+process.chdir(sdkDir)
 await $`rm -rf dist`
 await $`bun tsc`
-await $`rm openapi.json`

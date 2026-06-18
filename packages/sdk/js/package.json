@@ -7,6 +7,8 @@
   "scripts": {
     "typecheck": "bun ./script/check-event-contract.ts && tsgo --noEmit",
     "check:event-contract": "bun ./script/check-event-contract.ts",
+    "sync": "bun ./script/sync.ts",
+    "watch:contract": "bun --watch ./script/sync.ts",
     "build": "bun ./script/build.ts"
   },
   "exports": {

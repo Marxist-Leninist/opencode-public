@@ -29,6 +29,27 @@ function start(name: string, cwd: string, args: string[]) {
   return entry
 }
 
+async function runOnce(name: string, cwd: string, args: string[]) {
+  const child = Bun.spawn([bun, ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      FORCE_COLOR: "1",
+    },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  pipe(child.stdout, name)
+  pipe(child.stderr, name)
+
+  const code = await child.exited
+  if (code !== 0) {
+    throw new Error(`${name} exited with code ${code}`)
+  }
+}
+
 async function pipe(stream: ReadableStream<Uint8Array>, name: string) {
   const reader = stream.pipeThrough(new TextDecoderStream()).getReader()
   let pending = ""
@@ -64,6 +85,16 @@ process.on("SIGTERM", () => {
   process.exit(143)
 })
 
+const sdk = path.join(root, "packages", "sdk", "js")
+try {
+  await runOnce("sdk", sdk, ["run", "sync"])
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(1)
+}
+
+start("sdk", sdk, ["run", "watch:contract"])
+
 start("server", path.join(root, "packages", "opencode"), [
   "run",
   "--conditions=browser",
@@ -76,6 +107,7 @@ start("server", path.join(root, "packages", "opencode"), [
 start("app", path.join(root, "packages", "app"), ["dev", "--", "--port", "4444"])
 
 console.log("OpenCode local UI dev servers starting")
+console.log("SDK:      watching backend contract")
 console.log("Backend:  http://localhost:4096")
 console.log("Frontend: http://localhost:4444")
 
