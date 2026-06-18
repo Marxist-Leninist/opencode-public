@@ -23,11 +23,15 @@ async function walk(dir: string): Promise<string[]> {
 }
 
 const sourceEventTypes = new Set<string>()
+const sourceOperationIds = new Set<string>()
 const sourceFiles = await walk(opencodeSrc)
 for (const file of sourceFiles) {
   const text = await readFile(file, "utf8")
   for (const match of text.matchAll(/BusEvent\.define\(\s*["']([^"']+)["']/g)) {
     sourceEventTypes.add(match[1])
+  }
+  for (const match of text.matchAll(/operationId:\s*["']([^"']+)["']/g)) {
+    sourceOperationIds.add(match[1])
   }
 }
 
@@ -37,13 +41,34 @@ for (const match of generated.matchAll(/export type Event[A-Za-z0-9_]* = \{\s+ty
   generatedEventTypes.add(match[1])
 }
 
-const missing = [...sourceEventTypes].filter((event) => !generatedEventTypes.has(event)).sort()
-if (missing.length > 0) {
-  console.error("Generated SDK event contract is stale.")
+function toOperationType(operationId: string) {
+  return operationId
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join("")
+}
+
+const generatedOperationTypes = new Set<string>()
+for (const match of generated.matchAll(/export type ([A-Za-z0-9_]+)Responses =/g)) {
+  generatedOperationTypes.add(match[1])
+}
+
+const missingEvents = [...sourceEventTypes].filter((event) => !generatedEventTypes.has(event)).sort()
+const missingOperations = [...sourceOperationIds]
+  .map((operation) => ({ operation, type: toOperationType(operation) }))
+  .filter((item) => !generatedOperationTypes.has(item.type))
+  .sort((a, b) => a.operation.localeCompare(b.operation))
+
+if (missingEvents.length > 0 || missingOperations.length > 0) {
+  console.error("Generated SDK contract is stale.")
   console.error("Run `bun run build` in packages/sdk/js and commit the generated v2 SDK updates.")
   console.error("")
-  for (const event of missing) console.error(`- ${event}`)
+  for (const event of missingEvents) console.error(`- missing event: ${event}`)
+  for (const item of missingOperations) console.error(`- missing operation: ${item.operation} (${item.type}Responses)`)
   process.exit(1)
 }
 
-console.log(`event contract ok: ${sourceEventTypes.size} backend events covered by generated SDK`)
+console.log(
+  `sdk contract ok: ${sourceEventTypes.size} backend events and ${sourceOperationIds.size} operations covered by generated SDK`,
+)
