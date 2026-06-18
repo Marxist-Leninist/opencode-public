@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
+import type { BackendEvent } from "../backend-event"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
 
 const rootSession = (input: { id: string; parentID?: string; archived?: number }) =>
@@ -14,6 +15,14 @@ const rootSession = (input: { id: string; parentID?: string; archived?: number }
       archived: input.archived,
     },
   }) as Session
+
+const projectInfo = (id: string) =>
+  ({
+    id,
+    worktree: `/tmp/${id}`,
+    time: { created: 1, updated: 1 },
+    sandboxes: [],
+  }) as Project
 
 const userMessage = (id: string, sessionID: string) =>
   ({
@@ -57,6 +66,24 @@ const questionRequest = (id: string, sessionID: string, title = id) =>
     ],
   }) as QuestionRequest
 
+const sessionCreatedEvent = (info: Session) =>
+  ({ type: "session.created", properties: { sessionID: info.id, info } }) satisfies BackendEvent
+
+const sessionUpdatedEvent = (info: Session) =>
+  ({ type: "session.updated", properties: { sessionID: info.id, info } }) satisfies BackendEvent
+
+const sessionDeletedEvent = (info: Session) =>
+  ({ type: "session.deleted", properties: { sessionID: info.id, info } }) satisfies BackendEvent
+
+const messageUpdatedEvent = (info: Message) =>
+  ({ type: "message.updated", properties: { sessionID: info.sessionID, info } }) satisfies BackendEvent
+
+const partUpdatedEvent = (part: Part) =>
+  ({ type: "message.part.updated", properties: { sessionID: part.sessionID, part, time: 1 } }) satisfies BackendEvent
+
+const partRemovedEvent = (sessionID: string, messageID: string, partID: string) =>
+  ({ type: "message.part.removed", properties: { sessionID, messageID, partID } }) satisfies BackendEvent
+
 const baseState = (input: Partial<State> = {}) =>
   ({
     status: "complete",
@@ -86,10 +113,10 @@ const baseState = (input: Partial<State> = {}) =>
 
 describe("applyGlobalEvent", () => {
   test("upserts project.updated in sorted position", () => {
-    const project = [{ id: "a" }, { id: "c" }] as Project[]
+    const project = [projectInfo("a"), projectInfo("c")]
     let refreshCount = 0
     applyGlobalEvent({
-      event: { type: "project.updated", properties: { id: "b" } },
+      event: { type: "project.updated", properties: projectInfo("b") },
       project,
       refresh: () => {
         refreshCount += 1
@@ -106,7 +133,7 @@ describe("applyGlobalEvent", () => {
   test("handles global.disposed by triggering refresh", () => {
     let refreshCount = 0
     applyGlobalEvent({
-      event: { type: "global.disposed" },
+      event: { type: "global.disposed", properties: {} },
       project: [],
       refresh: () => {
         refreshCount += 1
@@ -120,7 +147,7 @@ describe("applyGlobalEvent", () => {
   test("handles server.connected by triggering refresh", () => {
     let refreshCount = 0
     applyGlobalEvent({
-      event: { type: "server.connected" },
+      event: { type: "server.connected", properties: {} },
       project: [],
       refresh: () => {
         refreshCount += 1
@@ -142,7 +169,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "session.created", properties: { info: rootSession({ id: "a" }) } },
+      event: sessionCreatedEvent(rootSession({ id: "a" })),
       store,
       setStore,
       push() {},
@@ -154,7 +181,7 @@ describe("applyDirectoryEvent", () => {
     expect(store.sessionTotal).toBe(2)
 
     applyDirectoryEvent({
-      event: { type: "session.created", properties: { info: rootSession({ id: "c", parentID: "a" }) } },
+      event: sessionCreatedEvent(rootSession({ id: "c", parentID: "a" })),
       store,
       setStore,
       push() {},
@@ -173,7 +200,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "session.idle", properties: { sessionID: "ses_1" } },
+      event: { type: "session.idle", properties: { sessionID: "ses_1" } } satisfies BackendEvent,
       store,
       setStore,
       push() {},
@@ -184,7 +211,10 @@ describe("applyDirectoryEvent", () => {
     expect(store.session_status.ses_1).toBeUndefined()
 
     applyDirectoryEvent({
-      event: { type: "session.status", properties: { sessionID: "ses_2", status: { type: "idle" } } },
+      event: {
+        type: "session.status",
+        properties: { sessionID: "ses_2", status: { type: "idle" } },
+      } satisfies BackendEvent,
       store,
       setStore,
       push() {},
@@ -200,7 +230,7 @@ describe("applyDirectoryEvent", () => {
     const pushes: string[] = []
 
     applyDirectoryEvent({
-      event: { type: "session.compacted", properties: { sessionID: "ses_1" } },
+      event: { type: "session.compacted", properties: { sessionID: "ses_1" } } satisfies BackendEvent,
       store,
       setStore,
       push(directory) {
@@ -211,7 +241,7 @@ describe("applyDirectoryEvent", () => {
     })
 
     applyDirectoryEvent({
-      event: { type: "server.heartbeat", properties: {} },
+      event: { type: "server.heartbeat", properties: {} } satisfies BackendEvent,
       store,
       setStore,
       push(directory) {
@@ -241,7 +271,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "session.updated", properties: { info: rootSession({ id: "ses_1", archived: 10 }) } },
+      event: sessionUpdatedEvent(rootSession({ id: "ses_1", archived: 10 })),
       store,
       setStore,
       push() {},
@@ -287,7 +317,7 @@ describe("applyDirectoryEvent", () => {
       )
 
       applyDirectoryEvent({
-        event: { type: "session.deleted", properties: { info: item.info } },
+        event: sessionDeletedEvent(item.info),
         store,
         setStore,
         push() {},
@@ -327,7 +357,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "session.created", properties: { info: kept } },
+      event: sessionCreatedEvent(kept),
       store,
       setStore,
       push() {},
@@ -373,7 +403,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "message.updated", properties: { info: userMessage("msg_2", sessionID) } },
+      event: messageUpdatedEvent(userMessage("msg_2", sessionID)),
       store,
       setStore,
       push() {},
@@ -384,15 +414,10 @@ describe("applyDirectoryEvent", () => {
     expect(store.message[sessionID]?.map((x) => x.id)).toEqual(["msg_1", "msg_2", "msg_3"])
 
     applyDirectoryEvent({
-      event: {
-        type: "message.updated",
-        properties: {
-          info: {
-            ...userMessage("msg_2", sessionID),
-            role: "assistant",
-          } as Message,
-        },
-      },
+      event: messageUpdatedEvent({
+        ...userMessage("msg_2", sessionID),
+        role: "assistant",
+      } as Message),
       store,
       setStore,
       push() {},
@@ -425,7 +450,7 @@ describe("applyDirectoryEvent", () => {
     )
 
     applyDirectoryEvent({
-      event: { type: "message.part.updated", properties: { part: textPart("prt_2", sessionID, messageID) } },
+      event: partUpdatedEvent(textPart("prt_2", sessionID, messageID)),
       store,
       setStore,
       push() {},
@@ -435,15 +460,10 @@ describe("applyDirectoryEvent", () => {
     expect(store.part[messageID]?.map((x) => x.id)).toEqual(["prt_1", "prt_2", "prt_3"])
 
     applyDirectoryEvent({
-      event: {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            ...textPart("prt_2", sessionID, messageID),
-            text: "changed",
-          } as Part,
-        },
-      },
+      event: partUpdatedEvent({
+        ...textPart("prt_2", sessionID, messageID),
+        text: "changed",
+      } as Part),
       store,
       setStore,
       push() {},
@@ -455,7 +475,7 @@ describe("applyDirectoryEvent", () => {
     if (updated?.type === "text") expect(updated.text).toBe("changed")
 
     applyDirectoryEvent({
-      event: { type: "message.part.removed", properties: { messageID, partID: "prt_1" } },
+      event: partRemovedEvent(sessionID, messageID, "prt_1"),
       store,
       setStore,
       push() {},
@@ -463,7 +483,7 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
     applyDirectoryEvent({
-      event: { type: "message.part.removed", properties: { messageID, partID: "prt_2" } },
+      event: partRemovedEvent(sessionID, messageID, "prt_2"),
       store,
       setStore,
       push() {},
@@ -471,7 +491,7 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
     applyDirectoryEvent({
-      event: { type: "message.part.removed", properties: { messageID, partID: "prt_3" } },
+      event: partRemovedEvent(sessionID, messageID, "prt_3"),
       store,
       setStore,
       push() {},
@@ -512,7 +532,7 @@ describe("applyDirectoryEvent", () => {
     expect(store.permission[sessionID]?.find((x) => x.id === "perm_2")?.permission).toBe("updated")
 
     applyDirectoryEvent({
-      event: { type: "permission.replied", properties: { sessionID, requestID: "perm_2" } },
+      event: { type: "permission.replied", properties: { sessionID, requestID: "perm_2", reply: "once" } },
       store,
       setStore,
       push() {},
@@ -582,7 +602,7 @@ describe("applyDirectoryEvent", () => {
     let lspLoads = 0
 
     applyDirectoryEvent({
-      event: { type: "server.instance.disposed" },
+      event: { type: "server.instance.disposed", properties: { directory: "/tmp" } },
       store,
       setStore,
       push(directory) {
@@ -595,7 +615,7 @@ describe("applyDirectoryEvent", () => {
     })
 
     applyDirectoryEvent({
-      event: { type: "lsp.updated" },
+      event: { type: "lsp.updated", properties: {} },
       store,
       setStore,
       push(directory) {

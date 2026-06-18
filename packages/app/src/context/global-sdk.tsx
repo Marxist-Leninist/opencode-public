@@ -1,4 +1,3 @@
-import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -8,6 +7,7 @@ import { createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { useServer } from "./server"
+import type { BackendEvent } from "./backend-event"
 
 const abortError = z.object({
   name: z.literal("AbortError"),
@@ -41,10 +41,10 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       server: currentServer.http,
     })
     const emitter = createGlobalEmitter<{
-      [key: string]: Event
+      [key: string]: BackendEvent
     }>()
 
-    type Queued = { directory: string; payload: Event }
+    type Queued = { directory: string; payload: BackendEvent }
     const FLUSH_FRAME_MS = 16
     const STREAM_YIELD_MS = 8
     const RECONNECT_DELAY_MS = 250
@@ -58,7 +58,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
 
     const deltaKey = (directory: string, messageID: string, partID: string) => `${directory}:${messageID}:${partID}`
 
-    const key = (directory: string, payload: Event) => {
+    const key = (directory: string, payload: BackendEvent) => {
       if (payload.type === "session.status") return `session.status:${directory}:${payload.properties.sessionID}`
       if (payload.type === "session.idle") return `session.idle:${directory}:${payload.properties.sessionID}`
       if (payload.type === "lsp.updated") return `lsp.updated:${directory}`
@@ -161,7 +161,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
                 continue
               }
 
-              const payload = event.payload as Event
+              const payload = event.payload as BackendEvent
 
               const k = key(directory, payload)
               if (k) {
