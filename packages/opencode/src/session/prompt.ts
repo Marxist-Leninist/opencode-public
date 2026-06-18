@@ -73,6 +73,7 @@ export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
   readonly loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts>
+  readonly resumeInterrupted: () => Effect.Effect<void>
   readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
@@ -1581,10 +1582,47 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       },
     )
 
+    const runRecoverable = Effect.fn("SessionPrompt.runRecoverable")(function* (sessionID: SessionID) {
+      yield* sessions.markRun(sessionID)
+      return yield* runLoop(sessionID).pipe(Effect.ensuring(sessions.clearRun(sessionID)))
+    })
+
+    const resumeInterrupted = Effect.fn("SessionPrompt.resumeInterrupted")(function* () {
+      const ctx = yield* InstanceState.context
+      const markers = (yield* sessions.listRuns()).filter(
+        (marker) => marker.projectID === ctx.project.id && marker.directory === ctx.directory,
+      )
+      if (markers.length === 0) return
+
+      yield* elog.info("resuming interrupted sessions", {
+        directory: ctx.directory,
+        sessions: markers.map((marker) => marker.sessionID),
+      })
+
+      yield* Effect.forEach(
+        markers,
+        (marker) =>
+          loop({ sessionID: marker.sessionID }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                const error = Cause.squash(cause)
+                yield* elog.error("failed to resume interrupted session", {
+                  sessionID: marker.sessionID,
+                  error: error instanceof Error ? error.message : String(error),
+                })
+                yield* sessions.clearRun(marker.sessionID)
+              }),
+            ),
+            Effect.forkIn(scope),
+          ),
+        { discard: true },
+      )
+    })
+
     const loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runRecoverable(input.sessionID))
     })
 
     const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
@@ -1713,6 +1751,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       cancel,
       prompt,
       loop,
+      resumeInterrupted,
       shell,
       command,
       resolvePromptParts,

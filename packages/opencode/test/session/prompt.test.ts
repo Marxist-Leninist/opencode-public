@@ -981,6 +981,81 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
+  10_000,
+)
+
+it.live(
+  "loop stores and clears interrupted-run marker",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm, dir }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        yield* llm.hang
+
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* user(chat.id, "hi")
+        console.log("recovery-test: before loop")
+
+        const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        console.log("recovery-test: before wait")
+        yield* llm.wait(1)
+        console.log("recovery-test: after wait")
+
+        let markers = yield* sessions.listRuns()
+        console.log("recovery-test: markers", markers.length)
+        const active = markers.find((marker) => marker.sessionID === chat.id)
+        expect(active?.directory).toBe(dir)
+
+        yield* prompt.cancel(chat.id)
+        console.log("recovery-test: after cancel")
+        yield* Fiber.await(fiber)
+        console.log("recovery-test: after await")
+
+        markers = yield* sessions.listRuns()
+        expect(markers.some((marker) => marker.sessionID === chat.id)).toBe(false)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
+)
+
+it.live(
+  "resumeInterrupted restarts a marked conversation",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* user(chat.id, "hi")
+        console.log("resume-test: before mark")
+        yield* sessions.markRun(chat.id)
+        console.log("resume-test: after mark")
+        yield* llm.text("resumed")
+
+        yield* prompt.resumeInterrupted()
+        console.log("resume-test: after resume call")
+        yield* llm.wait(1)
+        console.log("resume-test: after wait")
+
+        for (let i = 0; i < 50; i++) {
+          const markers = yield* sessions.listRuns()
+          if (!markers.some((marker) => marker.sessionID === chat.id)) break
+          yield* Effect.sleep("10 millis")
+        }
+
+        const markers = yield* sessions.listRuns()
+        expect(markers.some((marker) => marker.sessionID === chat.id)).toBe(false)
+
+        const msgs = yield* sessions.messages({ sessionID: chat.id })
+        expect(
+          msgs.some((msg) => msg.parts.some((part) => part.type === "text" && part.text === "resumed")),
+        ).toBe(true)
+      }),
+      { git: true, config: providerCfg },
+    ),
   3_000,
 )
 

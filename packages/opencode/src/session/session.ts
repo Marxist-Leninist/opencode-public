@@ -176,6 +176,22 @@ export const GlobalInfo = Schema.Struct({
   .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>
 
+export const RunMarker = Schema.Struct({
+  sessionID: SessionID,
+  projectID: ProjectID,
+  workspaceID: Schema.optional(WorkspaceID),
+  directory: Schema.String,
+  worktree: Schema.String,
+  pid: Schema.Number,
+  time: Schema.Struct({
+    started: Schema.Number,
+    updated: Schema.Number,
+  }),
+})
+  .annotate({ identifier: "SessionRunMarker" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type RunMarker = Types.DeepMutable<Schema.Schema.Type<typeof RunMarker>>
+
 export const CreateInput = Schema.optional(
   Schema.Struct({
     parentID: Schema.optional(SessionID),
@@ -386,6 +402,9 @@ export interface Interface {
     summary: Info["summary"]
   }) => Effect.Effect<void>
   readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
+  readonly markRun: (sessionID: SessionID) => Effect.Effect<void>
+  readonly clearRun: (sessionID: SessionID) => Effect.Effect<void>
+  readonly listRuns: () => Effect.Effect<RunMarker[]>
   readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<MessageV2.WithParts[]>
@@ -420,6 +439,9 @@ export type Patch = Types.DeepMutable<SyncEvent.Event<typeof Event.Updated>["dat
 
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
+
+const runMarkerKey = (sessionID: SessionID) => ["session_run", sessionID]
+const decodeRunMarker = Schema.decodeUnknownOption(RunMarker)
 
 export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service> = Layer.effect(
   Service,
@@ -639,6 +661,47 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service> =
       yield* patch(sessionID, { time: { updated: Date.now() }, revert: null })
     })
 
+    const markRun = Effect.fn("Session.markRun")(function* (sessionID: SessionID) {
+      const session = yield* get(sessionID)
+      const ctx = yield* InstanceState.context
+      yield* storage
+        .write(runMarkerKey(sessionID), {
+          sessionID,
+          projectID: session.projectID,
+          workspaceID: session.workspaceID,
+          directory: session.directory,
+          worktree: ctx.worktree,
+          pid: process.pid,
+          time: {
+            started: Date.now(),
+            updated: Date.now(),
+          },
+        } satisfies RunMarker)
+        .pipe(
+          Effect.catchAll((error) =>
+            Effect.sync(() => {
+              log.warn("failed to mark session run", { sessionID, error })
+            }),
+          ),
+        )
+    })
+
+    const clearRun = Effect.fn("Session.clearRun")(function* (sessionID: SessionID) {
+      yield* storage.remove(runMarkerKey(sessionID)).pipe(Effect.ignore)
+    })
+
+    const listRuns = Effect.fn("Session.listRuns")(function* () {
+      const keys = yield* storage.list(["session_run"]).pipe(Effect.orElseSucceed((): string[][] => []))
+      const result: RunMarker[] = []
+      for (const key of keys) {
+        const raw = yield* storage.read<unknown>(key).pipe(Effect.option)
+        if (Option.isNone(raw)) continue
+        const marker = decodeRunMarker(raw.value, { onExcessProperty: "preserve" })
+        if (Option.isSome(marker)) result.push(marker.value)
+      }
+      return result
+    })
+
     const setSummary = Effect.fn("Session.setSummary")(function* (input: {
       sessionID: SessionID
       summary: Info["summary"]
@@ -718,6 +781,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service> =
       setPermission,
       setRevert,
       clearRevert,
+      markRun,
+      clearRun,
+      listRuns,
       setSummary,
       diff,
       messages,

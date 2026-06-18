@@ -11,6 +11,7 @@ import { Instance } from "./instance"
 import { Log } from "@/util"
 import { FileWatcher } from "@/file/watcher"
 import { ShareNext } from "@/share"
+import { SessionPrompt } from "@/session/prompt"
 import * as Effect from "effect/Effect"
 import { Config } from "@/config"
 
@@ -38,5 +39,14 @@ export const InstanceBootstrap = Effect.gen(function* () {
         Project.setInitialized(Instance.project.id)
       }
     }),
+  )
+
+  yield* SessionPrompt.Service.use((svc) => svc.resumeInterrupted()).pipe(
+    Effect.catchCause((cause) =>
+      Effect.sync(() => {
+        Log.Default.warn("interrupted session recovery failed", { cause })
+      }),
+    ),
+    Effect.forkDetach,
   )
 }).pipe(Effect.withSpan("InstanceBootstrap"))
