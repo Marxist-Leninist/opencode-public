@@ -153,6 +153,33 @@ describe("tool.bash", () => {
       },
     })
   })
+
+  each("auto backgrounds long command", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await initBash()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `${bin} -e ${evalarg("setTimeout(()=>console.log('done'), 200)")}`,
+              description: "Run slow test command",
+              timeout: 5_000,
+              background_after: 50,
+            },
+            ctx,
+          ),
+        )
+
+        expect(result.metadata.backgrounded).toBe(true)
+        expect(result.metadata.pid).toBeGreaterThan(0)
+        expect(result.metadata.outputPath).toBeDefined()
+        expect(result.metadata.statusPath).toBeDefined()
+        expect(result.output).toContain("OpenCode detached it")
+      },
+    })
+  })
 })
 
 describe("tool.bash permissions", () => {

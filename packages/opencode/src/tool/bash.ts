@@ -1,6 +1,8 @@
 import { Schema } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
+import { writeFile } from "node:fs/promises"
+import { spawn as nodeSpawn } from "node:child_process"
 import * as Tool from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -25,6 +27,12 @@ import { InstanceState } from "@/effect"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 10 * 60 * 1000
+const DEFAULT_BACKGROUND_AFTER = (() => {
+  const raw = process.env.OPENCODE_EXPERIMENTAL_BASH_AUTO_BACKGROUND_MS
+  if (raw === undefined || raw === "") return 45_000
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 45_000
+})()
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -57,6 +65,9 @@ export const Parameters = Schema.Struct({
   timeout: Schema.optional(Schema.Number).annotate({
     description: `Optional timeout in milliseconds. Default ${DEFAULT_TIMEOUT}; use larger values for builds, tests, installs, packaging, deploys, and other long-running commands.`,
   }),
+  background_after: Schema.optional(Schema.Number).annotate({
+    description: `Optional milliseconds to wait before detaching a still-running command into a background job. Default ${DEFAULT_BACKGROUND_AFTER}. Use 0 to wait in the foreground until exit or timeout.`,
+  }),
   workdir: Schema.optional(Schema.String).annotate({
     description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
   }),
@@ -81,6 +92,27 @@ type Chunk = {
   text: string
   size: number
 }
+
+type BashMetadata = {
+  output: string
+  description: string
+  exit?: number | null
+  truncated: boolean
+  outputPath?: string
+  backgrounded?: boolean
+  backgroundJobID?: string
+  pid?: number
+  statusPath?: string
+  elapsed_ms?: number
+  background_after_ms?: number
+}
+
+type BackgroundRunResult =
+  | { kind: "exit"; code: number | null; signal: NodeJS.Signals | null }
+  | { kind: "background" }
+  | { kind: "abort" }
+  | { kind: "timeout" }
+  | { kind: "error"; error: string }
 
 export const log = Log.create({ service: "bash-tool" })
 
@@ -300,6 +332,31 @@ function cmd(shell: string, name: string, command: string, cwd: string, env: Nod
   })
 }
 
+function bgcmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
+  if (process.platform === "win32" && PS.has(name)) {
+    return nodeSpawn(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+      cwd,
+      env,
+      windowsHide: true,
+      detached: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  }
+
+  return nodeSpawn(command, [], {
+    shell,
+    cwd,
+    env,
+    windowsHide: true,
+    detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+}
+
+function jobID() {
+  return `bash_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 const parser = lazy(async () => {
   const { Parser } = await import("web-tree-sitter")
   const { default: treeWasm } = await import("web-tree-sitter/tree-sitter.wasm" as string, {
@@ -408,6 +465,204 @@ export const BashTool = Tool.define(
       }
     })
 
+    const runBackgroundable = Effect.fn("BashTool.runBackgroundable")(function* (
+      input: {
+        shell: string
+        name: string
+        command: string
+        cwd: string
+        env: NodeJS.ProcessEnv
+        timeout: number
+        backgroundAfter: number
+        description: string
+      },
+      ctx: Tool.Context,
+      limits: { maxLines: number; maxBytes: number },
+      keep: number,
+    ) {
+      const id = jobID()
+      const started = Date.now()
+      const outputPath = yield* trunc.write("")
+      const statusPath = `${outputPath}.status.json`
+      const sink = createWriteStream(outputPath, { flags: "a" })
+      const list: Chunk[] = []
+      let last = ""
+      let used = 0
+      let cut = false
+      let expired = false
+      let aborted = false
+
+      const child = bgcmd(input.shell, input.name, input.command, input.cwd, input.env)
+      const exited = () => child.exitCode !== null || child.signalCode !== null
+      const status = (state: string, extra: Record<string, unknown> = {}) =>
+        writeFile(
+          statusPath,
+          JSON.stringify(
+            {
+              job_id: id,
+              state,
+              pid: child.pid,
+              command: input.command,
+              cwd: input.cwd,
+              description: input.description,
+              started_at: new Date(started).toISOString(),
+              elapsed_ms: Date.now() - started,
+              output_path: outputPath,
+              status_path: statusPath,
+              ...extra,
+            },
+            null,
+            2,
+          ),
+          "utf-8",
+        ).catch(() => {})
+
+      const publish = () =>
+        Effect.runPromise(
+          ctx.metadata({
+            metadata: {
+              output: last,
+              description: input.description,
+              backgroundJobID: id,
+              pid: child.pid,
+              outputPath,
+              statusPath,
+            },
+          }),
+        ).catch(() => {})
+
+      const append = (chunk: Buffer) => {
+        const text = chunk.toString("utf-8")
+        const size = Buffer.byteLength(text, "utf-8")
+        list.push({ text, size })
+        used += size
+        while (used > keep && list.length > 1) {
+          const item = list.shift()
+          if (!item) break
+          used -= item.size
+          cut = true
+        }
+        last = preview(last + text)
+        sink.write(text)
+        publish()
+      }
+
+      child.stdout?.on("data", append)
+      child.stderr?.on("data", append)
+      void status("running")
+
+      const result = yield* Effect.promise(
+        () =>
+          new Promise<BackgroundRunResult>((resolve) => {
+            let settled = false
+            const complete = (next: BackgroundRunResult) => {
+              if (settled) return
+              settled = true
+              clearTimeout(backgroundTimer)
+              if (next.kind !== "background") {
+                clearTimeout(timeoutTimer)
+                ctx.abort.removeEventListener("abort", onAbort)
+              }
+              resolve(next)
+            }
+            const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+              clearTimeout(backgroundTimer)
+              clearTimeout(timeoutTimer)
+              ctx.abort.removeEventListener("abort", onAbort)
+              sink.end(() => {})
+              void status("completed", {
+                ended_at: new Date().toISOString(),
+                exit_code: code,
+                signal,
+              })
+              complete({ kind: "exit", code, signal })
+            }
+            const onAbort = () => {
+              aborted = true
+              void status("aborted", { ended_at: new Date().toISOString() })
+              void killPidTree(child.pid, { exited })
+              complete({ kind: "abort" })
+            }
+            const backgroundTimer = setTimeout(() => {
+              void status("running", { backgrounded_at: new Date().toISOString() })
+              complete({ kind: "background" })
+            }, input.backgroundAfter)
+            const timeoutTimer = setTimeout(() => {
+              expired = true
+              void status("timed_out", { ended_at: new Date().toISOString(), timeout_ms: input.timeout })
+              void killPidTree(child.pid, { exited })
+              complete({ kind: "timeout" })
+            }, input.timeout + 100)
+
+            ctx.abort.addEventListener("abort", onAbort, { once: true })
+            child.once("error", (error) => {
+              sink.end(() => {})
+              void status("error", { ended_at: new Date().toISOString(), error: error.message })
+              complete({ kind: "error", error: error.message })
+            })
+            child.once("close", finish)
+          }),
+      )
+
+      const raw = list.map((item) => item.text).join("")
+      const end = tail(raw, limits.maxLines, limits.maxBytes)
+      if (end.cut) cut = true
+      const outputTail = end.text || (result.kind === "background" ? "(no output yet)" : "(no output)")
+      const common: { title: string; metadata: BashMetadata } = {
+        title: input.description,
+        metadata: {
+          output: last || preview(outputTail),
+          description: input.description,
+          truncated: cut,
+          ...(cut ? { outputPath } : {}),
+        },
+      }
+
+      if (result.kind === "background") {
+        return {
+          ...common,
+          metadata: {
+            ...common.metadata,
+            backgrounded: true,
+            backgroundJobID: id,
+            pid: child.pid,
+            outputPath,
+            statusPath,
+            elapsed_ms: Date.now() - started,
+            background_after_ms: input.backgroundAfter,
+          },
+          output:
+            `Command is still running after ${input.backgroundAfter} ms, so OpenCode detached it and returned control to the agent.\n\n` +
+            `Job id: ${id}\n` +
+            `PID: ${child.pid ?? "unknown"}\n` +
+            `Output log: ${outputPath}\n` +
+            `Status file: ${statusPath}\n\n` +
+            `Continue other work now. To monitor this job, use wait with until_pid_exit=${child.pid ?? "PID"}, read the status file, or read/grep the output log. To stop it, use the process tool kill action on the PID.\n\n` +
+            `<bash_metadata>\nbackgrounded=true\nelapsed_ms=${Date.now() - started}\n</bash_metadata>\n\n` +
+            outputTail,
+        }
+      }
+
+      if (result.kind === "error") throw new Error(result.error)
+
+      let output = outputTail
+      if (cut) output = `...output truncated...\n\nFull output saved to: ${outputPath}\n\n` + output
+      const meta: string[] = []
+      if (expired || result.kind === "timeout") meta.push(`bash command timed out after ${input.timeout} ms.`)
+      if (aborted || result.kind === "abort") meta.push("User aborted the command")
+      if (meta.length > 0) output += "\n\n<bash_metadata>\n" + meta.join("\n") + "\n</bash_metadata>"
+
+      return {
+        ...common,
+        metadata: {
+          ...common.metadata,
+          exit: result.kind === "exit" ? result.code : null,
+          ...(cut ? { outputPath } : {}),
+        },
+        output,
+      }
+    })
+
     const run = Effect.fn("BashTool.run")(function* (
       input: {
         shell: string
@@ -416,6 +671,7 @@ export const BashTool = Tool.define(
         cwd: string
         env: NodeJS.ProcessEnv
         timeout: number
+        backgroundAfter: number
         description: string
       },
       ctx: Tool.Context,
@@ -438,6 +694,10 @@ export const BashTool = Tool.define(
           description: input.description,
         },
       })
+
+      if (input.backgroundAfter > 0 && input.timeout > input.backgroundAfter) {
+        return yield* runBackgroundable(input, ctx, limits, keep)
+      }
 
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
@@ -571,15 +831,17 @@ export const BashTool = Tool.define(
         )
       }
 
+      const metadata: BashMetadata = {
+        output: last || preview(output),
+        exit: code,
+        description: input.description,
+        truncated: cut,
+        ...(cut && file ? { outputPath: file } : {}),
+      }
+
       return {
         title: input.description,
-        metadata: {
-          output: last || preview(output),
-          exit: code,
-          description: input.description,
-          truncated: cut,
-          ...(cut && file ? { outputPath: file } : {}),
-        },
+        metadata,
         output,
       }
     })
@@ -604,6 +866,7 @@ export const BashTool = Tool.define(
             .replaceAll("${chaining}", chain)
             .replaceAll("${defaultTimeout}", String(DEFAULT_TIMEOUT))
             .replaceAll("${defaultTimeoutMinutes}", String(Math.round(DEFAULT_TIMEOUT / 60_000)))
+            .replaceAll("${backgroundAfter}", String(DEFAULT_BACKGROUND_AFTER))
             .replaceAll("${maxLines}", String(limits.maxLines))
             .replaceAll("${maxBytes}", String(limits.maxBytes)),
           parameters: Parameters,
@@ -615,7 +878,13 @@ export const BashTool = Tool.define(
               if (params.timeout !== undefined && params.timeout < 0) {
                 throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
               }
+              if (params.background_after !== undefined && params.background_after < 0) {
+                throw new Error(
+                  `Invalid background_after value: ${params.background_after}. background_after must be zero or a positive number.`,
+                )
+              }
               const timeout = params.timeout ?? DEFAULT_TIMEOUT
+              const backgroundAfter = params.background_after ?? DEFAULT_BACKGROUND_AFTER
               const ps = PS.has(name)
               const root = yield* parse(params.command, ps)
               const scan = yield* collect(root, cwd, ps, shell)
@@ -630,6 +899,7 @@ export const BashTool = Tool.define(
                   cwd,
                   env: yield* shellEnv(ctx, cwd),
                   timeout,
+                  backgroundAfter,
                   description: params.description,
                 },
                 ctx,
