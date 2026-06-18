@@ -165,6 +165,65 @@ describe("applyDirectoryEvent", () => {
     expect(store.sessionTotal).toBe(2)
   })
 
+  test("clears session status when the server emits idle events", () => {
+    const [store, setStore] = createStore(
+      baseState({
+        session_status: { ses_1: { type: "busy" } },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.idle", properties: { sessionID: "ses_1" } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session_status.ses_1).toBeUndefined()
+
+    applyDirectoryEvent({
+      event: { type: "session.status", properties: { sessionID: "ses_2", status: { type: "idle" } } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session_status.ses_2).toBeUndefined()
+  })
+
+  test("refreshes directory for unhandled lifecycle events", () => {
+    const [store, setStore] = createStore(baseState())
+    const pushes: string[] = []
+
+    applyDirectoryEvent({
+      event: { type: "session.compacted", properties: { sessionID: "ses_1" } },
+      store,
+      setStore,
+      push(directory) {
+        pushes.push(directory)
+      },
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    applyDirectoryEvent({
+      event: { type: "server.heartbeat", properties: {} },
+      store,
+      setStore,
+      push(directory) {
+        pushes.push(directory)
+      },
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(pushes).toEqual(["/tmp"])
+  })
+
   test("cleans session caches when archived", () => {
     const message = userMessage("msg_1", "ses_1")
     const [store, setStore] = createStore(

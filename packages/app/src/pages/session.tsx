@@ -1582,9 +1582,12 @@ export default function Page() {
 
   const busy = (sessionID: string) => {
     if ((sync.data.session_status[sessionID] ?? { type: "idle" as const }).type !== "idle") return true
-    return (sync.data.message[sessionID] ?? []).some(
-      (item) => item.role === "assistant" && typeof item.time.completed !== "number",
-    )
+    const messages = sync.data.message[sessionID] ?? []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.role === "assistant") return typeof message.time.completed !== "number"
+    }
+    return false
   }
 
   const queuedFollowups = createMemo(() => {
@@ -1830,13 +1833,22 @@ export default function Page() {
     const sessionID = params.id
     if (!sessionID) return
 
+    // Read all reactive guards before returning. If an earlier guard short-circuits,
+    // Solid can stop tracking busy(), so the queued follow-up may never resume when
+    // the turn goes idle.
     const item = queuedFollowups()[0]
+    const sending = followupBusy(sessionID)
+    const failed = followup.failed[sessionID]
+    const paused = followup.paused[sessionID]
+    const blocked = composer.blocked()
+    const working = busy(sessionID)
+
     if (!item) return
-    if (followupBusy(sessionID)) return
-    if (followup.failed[sessionID] === item.id) return
-    if (followup.paused[sessionID]) return
-    if (composer.blocked()) return
-    if (busy(sessionID)) return
+    if (sending) return
+    if (failed === item.id) return
+    if (paused) return
+    if (blocked) return
+    if (working) return
 
     void sendFollowup(sessionID, item.id)
   })

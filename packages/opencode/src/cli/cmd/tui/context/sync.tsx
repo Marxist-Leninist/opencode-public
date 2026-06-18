@@ -227,7 +227,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "session.status": {
+          if (event.properties.status.type === "idle") {
+            setStore(
+              "session_status",
+              produce((draft) => {
+                delete draft[event.properties.sessionID]
+              }),
+            )
+            break
+          }
           setStore("session_status", event.properties.sessionID, event.properties.status)
+          break
+        }
+
+        case "session.idle": {
+          setStore(
+            "session_status",
+            produce((draft) => {
+              delete draft[event.properties.sessionID]
+            }),
+          )
           break
         }
 

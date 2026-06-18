@@ -17,6 +17,22 @@ import { dropSessionCaches } from "./session-cache"
 import { diffs as list, message as clean } from "@/utils/diffs"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const REFRESH_PREFIXES = ["message.", "permission.", "question.", "session.", "todo.", "vcs."]
+const NO_REFRESH_EVENTS = new Set(["server.connected", "server.heartbeat", "session.error"])
+
+function shouldRefreshUnhandledDirectoryEvent(type: string) {
+  if (NO_REFRESH_EVENTS.has(type)) return false
+  return REFRESH_PREFIXES.some((prefix) => type.startsWith(prefix))
+}
+
+function clearSessionStatus(setStore: SetStoreFunction<State>, sessionID: string) {
+  if (!sessionID) return
+  setStore(
+    produce((draft) => {
+      delete draft.session_status[sessionID]
+    }),
+  )
+}
 
 export function applyGlobalEvent(input: {
   event: { type: string; properties?: unknown }
@@ -111,6 +127,7 @@ export function applyDirectoryEvent(input: {
     input.push(input.directory)
     return
   }
+  let handled = true
   switch (event.type) {
     case "server.instance.disposed": {
       input.push(input.directory)
@@ -188,7 +205,16 @@ export function applyDirectoryEvent(input: {
     }
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
+      if (props.status.type === "idle") {
+        clearSessionStatus(input.setStore, props.sessionID)
+        break
+      }
       input.setStore("session_status", props.sessionID, reconcile(props.status))
+      break
+    }
+    case "session.idle": {
+      const props = event.properties as { sessionID: string }
+      clearSessionStatus(input.setStore, props.sessionID)
       break
     }
     case "message.updated": {
@@ -370,5 +396,9 @@ export function applyDirectoryEvent(input: {
       input.loadLsp()
       break
     }
+    default: {
+      handled = false
+    }
   }
+  if (!handled && shouldRefreshUnhandledDirectoryEvent(event.type)) input.push(input.directory)
 }
