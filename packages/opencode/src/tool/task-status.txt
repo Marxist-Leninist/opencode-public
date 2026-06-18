@@ -1,0 +1,3 @@
+List the background subagent tasks for this session and their state.
+
+Shows each task you started with `task` using `background: true`, with its task_id, status (running / done / error / cancelled), elapsed time, agent type, and description. Use it to see whether background work has finished, then collect a finished task's output with `task_result(task_id=...)`. Pass an optional `task_id` to check just one.

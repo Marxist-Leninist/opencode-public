@@ -87,7 +87,7 @@ process.on("SIGTERM", () => {
 
 const sdk = path.join(root, "packages", "sdk", "js")
 try {
-  await runOnce("sdk", sdk, ["run", "sync"])
+  await runOnce("sdk", sdk, ["run", "sync:if-needed"])
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(1)

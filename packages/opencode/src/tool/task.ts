@@ -5,13 +5,20 @@ import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
 import type { SessionPrompt } from "../session/prompt"
+import { BackgroundTask } from "../session/background-task"
 import { Config } from "../config"
 import { Effect, Schema } from "effect"
+
+export interface TaskPromptHandlers {
+  onComplete?(result: MessageV2.WithParts): void
+  onError?(error: string): void
+}
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): void
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
   prompt(input: SessionPrompt.PromptInput): Effect.Effect<MessageV2.WithParts>
+  forkPrompt(input: SessionPrompt.PromptInput, handlers?: TaskPromptHandlers): void
 }
 
 const id = "task"
@@ -23,6 +30,14 @@ export const Parameters = Schema.Struct({
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
+  }),
+  background: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "When true, the subagent runs in the background and this tool returns immediately with the task_id. The main conversation continues without waiting. This is the default. Pass false only when you need the old blocking behavior.",
+  }),
+  wait_for_result: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "When true, block the main conversation until the subagent finishes and return its final text inline. Default: false, so the subagent runs in the background.",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
 })
@@ -121,34 +136,78 @@ export const TaskTool = Tool.define(
         ops.cancel(nextSession.id)
       }
 
+      const promptInput = {
+        messageID,
+        sessionID: nextSession.id,
+        model: {
+          modelID: model.modelID,
+          providerID: model.providerID,
+        },
+        agent: next.name,
+        tools: {
+          ...(canTodo ? {} : { todowrite: false }),
+          ...(canTask ? {} : { task: false }),
+          ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
+        },
+        parts: yield* ops.resolvePromptParts(params.prompt),
+      } satisfies SessionPrompt.PromptInput
+
+      const waitForResult = params.wait_for_result === true || params.background === false
+
+      if (!waitForResult) {
+        BackgroundTask.register({
+          taskID: nextSession.id,
+          parentSessionID: ctx.sessionID,
+          description: params.description,
+          subagentType: next.name,
+          status: "running",
+          startedAt: Date.now(),
+        })
+
+        ops.forkPrompt(promptInput, {
+          onComplete(result) {
+            BackgroundTask.complete(
+              nextSession.id,
+              result.parts.findLast((item) => item.type === "text")?.text ?? "",
+            )
+          },
+          onError(error) {
+            BackgroundTask.fail(nextSession.id, error)
+          },
+        })
+
+        return {
+          title: params.description,
+          metadata: {
+            sessionId: nextSession.id,
+            model,
+            background: true,
+            waitForResult: false,
+          },
+          output: [
+            `task_id: ${nextSession.id}`,
+            "",
+            "Subagent spawned in the background. Main conversation can continue immediately.",
+            "Use task_status to inspect progress, task_result with this task_id to collect the result, or pass task_id to task to continue the same subagent session.",
+          ].join("\n"),
+        }
+      }
+
       return yield* Effect.acquireUseRelease(
         Effect.sync(() => {
           ctx.abort.addEventListener("abort", cancel)
         }),
         () =>
           Effect.gen(function* () {
-            const parts = yield* ops.resolvePromptParts(params.prompt)
-            const result = yield* ops.prompt({
-              messageID,
-              sessionID: nextSession.id,
-              model: {
-                modelID: model.modelID,
-                providerID: model.providerID,
-              },
-              agent: next.name,
-              tools: {
-                ...(canTodo ? {} : { todowrite: false }),
-                ...(canTask ? {} : { task: false }),
-                ...Object.fromEntries((cfg.experimental?.primary_tools ?? []).map((item) => [item, false])),
-              },
-              parts,
-            })
+            const result = yield* ops.prompt(promptInput)
 
             return {
               title: params.description,
               metadata: {
                 sessionId: nextSession.id,
                 model,
+                background: false,
+                waitForResult: true,
               },
               output: [
                 `task_id: ${nextSession.id} (for resuming to continue this task if needed)`,

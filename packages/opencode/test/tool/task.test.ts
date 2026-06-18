@@ -9,6 +9,8 @@ import { MessageV2 } from "../../src/session/message-v2"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID } from "../../src/session/schema"
 import { ModelID, ProviderID } from "../../src/provider/schema"
+import { TaskResultTool } from "../../src/tool/task-result"
+import { TaskStatusTool } from "../../src/tool/task-status"
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
@@ -64,7 +66,11 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
   return { chat, assistant }
 })
 
-function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void; text?: string }): TaskPromptOps {
+function stubOps(opts?: {
+  onPrompt?: (input: SessionPrompt.PromptInput) => void
+  onForkPrompt?: (input: SessionPrompt.PromptInput) => void
+  text?: string
+}): TaskPromptOps {
   return {
     cancel() {},
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
@@ -73,6 +79,11 @@ function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void;
         opts?.onPrompt?.(input)
         return reply(input, opts?.text ?? "done")
       }),
+    forkPrompt: (input, handlers) => {
+      opts?.onForkPrompt?.(input)
+      opts?.onPrompt?.(input)
+      handlers?.onComplete?.(reply(input, opts?.text ?? "done"))
+    },
   }
 }
 
@@ -222,6 +233,146 @@ describe("tool.task", () => {
         expect(result.metadata.sessionId).toBe(child.id)
         expect(result.output).toContain(`task_id: ${child.id}`)
         expect(seen?.sessionID).toBe(child.id)
+      }),
+    ),
+  )
+
+  it.live("execute defaults to a background subagent and returns immediately", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let forked: SessionPrompt.PromptInput | undefined
+        let promptCalled = false
+        const promptOps: TaskPromptOps = {
+          cancel() {},
+          resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+          prompt: (input) =>
+            Effect.sync(() => {
+              promptCalled = true
+              return reply(input, "blocking result")
+            }),
+          forkPrompt: (input) => {
+            forked = input
+          },
+        }
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(promptCalled).toBe(false)
+        expect(forked?.sessionID).toBe(result.metadata.sessionId)
+        expect(result.metadata.background).toBe(true)
+        expect(result.metadata.waitForResult).toBe(false)
+        expect(result.output).toContain(`task_id: ${result.metadata.sessionId}`)
+        expect(result.output).toContain("background")
+        expect(result.output).not.toContain("<task_result>")
+      }),
+    ),
+  )
+
+  it.live("background task results can be inspected and collected later", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        const promptOps = stubOps({ text: "background done" })
+        const ctx = {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        }
+
+        const task = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
+          ctx,
+        )
+
+        const statusTool = yield* TaskStatusTool
+        const statusDef = yield* statusTool.init()
+        const status = yield* statusDef.execute({}, ctx)
+        expect(status.metadata.count).toBe(1)
+        expect(status.metadata.done).toBe(1)
+        expect(status.output).toContain(task.metadata.sessionId)
+
+        const resultTool = yield* TaskResultTool
+        const resultDef = yield* resultTool.init()
+        const result = yield* resultDef.execute({ task_id: task.metadata.sessionId }, ctx)
+        expect(result.metadata.found).toBe(true)
+        expect(result.metadata.status).toBe("done")
+        expect(result.output).toContain("<task_result>")
+        expect(result.output).toContain("background done")
+      }),
+    ),
+  )
+
+  it.live("execute can still block when wait_for_result is requested", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        let forked = false
+        const promptOps = stubOps({
+          text: "blocked result",
+          onPrompt: (input) => (seen = input),
+          onForkPrompt: () => {
+            forked = true
+          },
+        })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+            wait_for_result: true,
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(forked).toBe(false)
+        expect(seen?.sessionID).toBe(result.metadata.sessionId)
+        expect(result.metadata.background).toBe(false)
+        expect(result.metadata.waitForResult).toBe(true)
+        expect(result.output).toContain("<task_result>")
+        expect(result.output).toContain("blocked result")
       }),
     ),
   )

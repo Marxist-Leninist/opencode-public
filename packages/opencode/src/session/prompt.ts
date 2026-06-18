@@ -49,7 +49,7 @@ import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
 import { EffectLogger } from "@/effect"
 import { InstanceState } from "@/effect"
-import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { TaskTool, type TaskPromptHandlers, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { EffectBridge } from "@/effect"
 
@@ -115,6 +115,29 @@ export const layer = Layer.effect(
         cancel: (sessionID: SessionID) => run.fork(cancel(sessionID)),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
         prompt: (input: PromptInput) => prompt(input),
+        forkPrompt: (input: PromptInput, handlers?: TaskPromptHandlers) => {
+          run.fork(
+            prompt(input).pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => {
+                  handlers?.onComplete?.(result)
+                }),
+              ),
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  const error = String(Cause.squash(cause))
+                  yield* Effect.sync(() => {
+                    handlers?.onError?.(error)
+                  })
+                  yield* elog.error("background subagent prompt failed", {
+                    sessionID: input.sessionID,
+                    error,
+                  })
+                }),
+              ),
+            ),
+          )
+        },
       } satisfies TaskPromptOps
     })
 

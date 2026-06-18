@@ -11,7 +11,15 @@ const dir = path.resolve(__dirname, "..")
 
 process.chdir(dir)
 
-await import("./generate.ts")
+// Incremental backend rebuilds (the desktop `dev` watcher) reuse the existing
+// models snapshot instead of re-fetching models.dev over the network on every
+// save. The full build (predev/prebuild/release) still regenerates it.
+const skipGenerate = process.argv.includes("--skip-generate") || process.env.OPENCODE_SKIP_GENERATE === "1"
+if (skipGenerate) {
+  console.log("Skipping generate (incremental rebuild, reusing models-snapshot)")
+} else {
+  await import("./generate.ts")
+}
 
 // Load migrations from migration directories
 const migrationDirs = (

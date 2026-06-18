@@ -1,4 +1,4 @@
-import { Component } from "solid-js"
+import { Component, ErrorBoundary } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -77,7 +77,18 @@ export const DialogSettings: Component = () => {
           <SettingsKeybinds />
         </Tabs.Content>
         <Tabs.Content value="personalization" class="no-scrollbar">
-          <SettingsPersonalization />
+          <ErrorBoundary
+            fallback={() => (
+              <div class="flex h-full flex-col gap-2 overflow-y-auto px-4 py-6 text-13-regular sm:px-10">
+                <h2 class="text-16-medium text-text-strong">{language.t("settings.personalization.title")}</h2>
+                <p class="max-w-[640px] text-text-weak">
+                  Personalization could not load. Check the global config preferences shape, then reopen Settings.
+                </p>
+              </div>
+            )}
+          >
+            <SettingsPersonalization />
+          </ErrorBoundary>
         </Tabs.Content>
         <Tabs.Content value="providers" class="no-scrollbar">
           <SettingsProviders />

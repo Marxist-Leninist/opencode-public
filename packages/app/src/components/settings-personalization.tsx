@@ -53,17 +53,23 @@ const PERSONALITY_OPTIONS: PersonalityOption[] = [
 
 const PERSONALITY_VALUES = new Set<PersonalityValue>(PERSONALITY_OPTIONS.map((o) => o.value))
 
-type PreferencesConfig = Config & {
-  preferences?: string | string[]
+type PreferencesConfig = Omit<Config, "preferences"> & {
+  preferences?: unknown
 }
 
-function withPreferences(config: Config) {
-  return config as PreferencesConfig
+function withPreferences(config: Config | undefined) {
+  return (config ?? {}) as PreferencesConfig
+}
+
+function preferenceLine(value: unknown) {
+  if (typeof value !== "string") return ""
+  return value.trim()
 }
 
 function preferencesArray(preferences: PreferencesConfig["preferences"]): string[] {
   if (!preferences) return []
-  if (Array.isArray(preferences)) return preferences.map((s) => s.trim()).filter(Boolean)
+  if (Array.isArray(preferences)) return preferences.map(preferenceLine).filter(Boolean)
+  if (typeof preferences !== "string") return []
   return preferences
     .split(/\n{2,}/)
     .map((s) => s.trim())
@@ -207,7 +213,7 @@ export const SettingsPersonalization: Component = () => {
     try {
       const built = current()
       const preferences = buildPreferences(built)
-      await globalSync.updateConfig({ preferences } as PreferencesConfig)
+      await globalSync.updateConfig({ preferences } as Config)
       setState("loaded", built)
       showToast({ variant: "success", icon: "circle-check", title: "Personalization saved" })
     } catch (err) {

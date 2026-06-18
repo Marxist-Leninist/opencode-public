@@ -1,0 +1,8 @@
+Collect the result of a background subagent you started with `task` using `background: true`.
+
+Pass the `task_id` that the background `task` call returned. Behavior:
+- If the task has finished, returns the subagent's final output inside a <task_result>…</task_result> block.
+- If it failed or was cancelled, returns that status and any error.
+- If it is still running, returns its running status. Pass `wait_seconds` to block up to N seconds for it to finish before returning (default 0 = return immediately).
+
+Use `task_status` first if you want to see all background tasks and which are done.

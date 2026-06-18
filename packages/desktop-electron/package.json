@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsgo -b",
     "predev": "bun ./scripts/predev.ts",
-    "dev": "electron-vite dev",
+    "dev": "bun ./scripts/dev.ts",
+    "dev:renderer-only": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
     "build": "electron-vite build",
     "build:fast": "bun ./scripts/prebuild.ts && OPENCODE_FAST_BUILD=true electron-vite build",

@@ -58,7 +58,15 @@ export default defineConfig({
           if (id !== "virtual:opencode-server") return
           // DEV/PREVIEW: externalize to the backend's source build dir (loaded only via dynamic
           // import() at runtime, so safe) — skips re-bundling the 20MB blob, ~0.4s main build.
-          if (externalizeServer) return { id: serverEntryUrl, external: true }
+          if (externalizeServer) {
+            // Couple backend changes to the running app: watch the backend build
+            // output so that when the `dev` orchestrator rebuilds node.js (after a
+            // packages/opencode/src edit), electron-vite restarts Electron and the
+            // new backend is loaded. Without this, backend edits stay frozen in the
+            // app until a manual rebuild + restart.
+            this.addWatchFile(fileURLToPath(serverEntryUrl))
+            return { id: serverEntryUrl, external: true }
+          }
           // PACKAGING: inline so the backend is bundled into the shipped app.
           return this.resolve(`${OPENCODE_SERVER_DIST}/node.js`)
         },
